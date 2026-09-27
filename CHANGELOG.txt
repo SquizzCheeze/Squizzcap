@@ -2,8 +2,8 @@ Squizzcap - Changelog
 =====================
 
 
-V1.0.0
-------
+V1.0.0 (2026-09-27)
+------------------
 
 First public release.
 
