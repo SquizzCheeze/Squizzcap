@@ -181,11 +181,14 @@ local function Summarise(model)
     if healthy then
         model.speed = { from = healthy.hpBefore, seconds = healthy.tbd }
     elseif hits[#hits] and hits[#hits].hpBefore then
-        -- Never at 90%+ inside the recap: measure from its oldest hit.
+        -- Never at 90%+ inside the recap. It only holds the last 10 hits
+        -- (measured in game 2026-09-27), so the slide began before it and
+        -- its length is unknown: measure from the oldest hit, but say so
+        -- rather than call it burst or worn down.
         local oldest = hits[#hits]
-        model.speed = { from = oldest.hpBefore, seconds = oldest.tbd }
+        model.speed = { from = oldest.hpBefore, seconds = oldest.tbd, partial = true }
     end
-    if model.speed then
+    if model.speed and not model.speed.partial then
         model.speed.burst = model.speed.seconds <= 3
     end
 end

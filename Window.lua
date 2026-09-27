@@ -513,8 +513,9 @@ local function RenderStrip(model)
             li = li + 1
             local l = PoolLine(li)
             local measured = math.abs(a[1] - b[1]) <= 0.01
-            l:SetThickness(measured and 2 or 1.5)
-            l:SetColorTexture(accent[1], accent[2], accent[3], measured and 1 or 0.45)
+            -- Lightened toward white so it stands off the class-coloured fill.
+            l:SetThickness(measured and 3 or 1.5)
+            l:SetColorTexture(accent[1] * 0.6 + 0.4, accent[2] * 0.6 + 0.4, accent[3] * 0.6 + 0.4, measured and 1 or 0.5)
             l:SetStartPoint("BOTTOMLEFT", ui.plot, a[1], a[2])
             l:SetEndPoint("BOTTOMLEFT", ui.plot, b[1], b[2])
             l:Show()
@@ -544,7 +545,7 @@ local function RenderStrip(model)
         if h > 0.5 then
             ci = ci + 1
             local c = PoolCol(ci)
-            c:SetColorTexture(accent[1], accent[2], accent[3], 0.14)
+            c:SetColorTexture(accent[1], accent[2], accent[3], 0.09)
             c:ClearAllPoints()
             c:SetPoint("BOTTOMLEFT", ui.plot, "BOTTOMLEFT", x, 0)
             c:SetHeight(h)
@@ -559,7 +560,7 @@ local function RenderStrip(model)
         local h = hits[i]
         local d = PoolDot(i)
         d.hitIndex = i
-        local size = math.floor(10 + math.sqrt(maxAmt > 0 and h.amount / maxAmt or 0) * 12 + 0.5)
+        local size = math.floor(7 + math.sqrt(maxAmt > 0 and h.amount / maxAmt or 0) * 8 + 0.5)
         d:SetSize(size + 8, size + 8)
         d:ClearAllPoints()
         d:SetPoint("CENTER", ui.plot, "BOTTOMLEFT", X(h.tbd), Y(i == 1 and 0 or h.hpAfter))
@@ -1126,8 +1127,14 @@ Render = function()
         local sp = model.speed
         if sp then
             ui.statSpeed.value:SetText(string.format("%d%%  >  0 in %.1fs", math.floor(sp.from + 0.5), sp.seconds))
-            ui.statSpeed.sub:SetText(sp.burst and "BURST" or "WORN DOWN")
-            local c = sp.burst and C.burst or C.worn
+            local c
+            if sp.partial then
+                ui.statSpeed.sub:SetText(string.format("recap starts at %d%%", math.floor(sp.from + 0.5)))
+                c = C.muted
+            else
+                ui.statSpeed.sub:SetText(sp.burst and "BURST" or "WORN DOWN")
+                c = sp.burst and C.burst or C.worn
+            end
             ui.statSpeed.sub:SetTextColor(c[1], c[2], c[3])
         else
             ui.statSpeed.value:SetText("-")
@@ -1304,7 +1311,8 @@ function Window.ShowToast(model, runIndex, deathIndex)
         toast.avoid:SetShown(kb.avoidable)
         toast.line2:SetText(string.format("%s  |cffff8a7d-%s|r", kb.source or "", Fmt(kb.amount)))
         local sp = model.speed
-        toast.line3:SetText(sp and string.format("%d%% > 0 in %.1fs  ·  %s", math.floor(sp.from + 0.5), sp.seconds, sp.burst and "|cffff8a7dBURST|r" or "|cffe6cc66WORN DOWN|r") or "")
+        local tag = sp and (sp.partial and "recap starts here" or (sp.burst and "|cffff8a7dBURST|r" or "|cffe6cc66WORN DOWN|r"))
+        toast.line3:SetText(sp and string.format("%d%% > 0 in %.1fs  ·  %s", math.floor(sp.from + 0.5), sp.seconds, tag) or "")
     end
     RestorePosition(toast, "toast")
     toast:SetScale(addon.db and addon.db.window.scale or 1)
