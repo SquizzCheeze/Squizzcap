@@ -90,6 +90,20 @@ icons). Headings and numbers are set in **Barlow** by the Barlow Project
 Authors, bundled under the SIL Open Font License
 ([Media/Fonts/OFL.txt](Media/Fonts/OFL.txt)).
 
+## Support
+
+If you enjoy using Squizzcap, consider supporting development on
+[Ko-fi](https://ko-fi.com/squizz) ❤️
+
+## More addons by Squizz
+
+- **[SquizzFrames](https://www.curseforge.com/projects/1649203)** — party, raid, pet and unit frames with a full indicator system, click-casting and a tank tracker
+- **[Squizzumables](https://www.curseforge.com/projects/1483099)** — one-click reminders for food, flasks, oils and class buffs, plus raid tools and a restyled Cooldown Manager
+- **[SquizzTalents](https://www.curseforge.com/projects/1705647)** — all your talent builds in one list, with a reminder when your build doesn't match the content
+- **[DPS Report](https://www.curseforge.com/projects/1504877)** — a lightweight damage meter with spell breakdowns and an end-of-key MVP summary
+- **[Avatar Continued](https://www.curseforge.com/projects/1533608)** — your character model on screen as part of your UI
+- **[KSLBestDungeon](https://www.curseforge.com/projects/1599575)** — ranks Mythic+ dungeons by how many of your KeystoneLoot favorites drop there
+
 ## License
 
 [MIT](LICENSE). The bundled fonts remain under the
