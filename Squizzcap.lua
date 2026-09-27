@@ -18,7 +18,7 @@ local defaults = {
         rememberPosition = true,
     },
     toast = {},
-    onDeath = "window", -- "window" | "toast" | "none"
+    onDeath = "toast",  -- "window" | "toast" | "none"; compact by default (user decision 2026-09-27)
     runs = {},          -- saved deaths, see "Runs" below
 }
 
@@ -462,7 +462,7 @@ local function CreateOptionsPanel()
     CreateDropdown(content, "Show", y, {
         { value = "window", text = "The full recap window" },
         { value = "toast",  text = "A compact summary (click for the full window)" },
-        { value = "none",   text = "Nothing (use /squizzcap test)" },
+        { value = "none",   text = "Nothing (use /squizzcap show)" },
     }, function() return db.onDeath end, function(val) db.onDeath = val end)
     y = y - 60
 

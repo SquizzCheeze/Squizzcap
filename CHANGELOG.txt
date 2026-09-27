@@ -7,8 +7,10 @@ V1.0.0
 
 First public release.
 
-- A death recap that opens the moment you die and stays open through
-  release, resurrection and loading screens until you close it.
+- A compact death summary pops up the moment you die - what killed you,
+  how hard it hit and how fast you went down - and stays through release,
+  resurrection and loading screens until you close it. Click Details for
+  the full recap.
 - Killed By: the spell that killed you, who cast it, the damage and
   overkill, and Blizzard's Avoidable / Deadly markers.
 - At a glance: how fast you went down (e.g. 100% to 0 in 1.8s, burst or
@@ -22,6 +24,5 @@ First public release.
 - Every death is saved for your character and grouped by dungeon or raid
   visit, so you can look back over a whole key or raid night afterwards.
 - Link a death recap to chat, or post a one-line summary to your group.
-- Prefer something smaller? Choose the compact summary in the options; it
-  opens the full recap when clicked.
+- Rather see the full recap straight away? Choose it in the options.
 - /squizzcap opens the options, /squizzcap show opens your last death.
