@@ -1,0 +1,29 @@
+# Packaging metadata for BigWigsMods/packager, used by the release workflow in
+# .github/workflows/release.yml.
+#
+# The addon folder must be named Squizzcap when installed -- this is what
+# names the folder inside the zip.
+package-as: Squizzcap
+
+# Upload the hand-written changelog as the release notes rather than a list of
+# commit messages. This sends the WHOLE file, newest version first.
+manual-changelog:
+  filename: CHANGELOG.txt
+  markup-type: text
+
+# Development-only files, kept out of the zip so they never ship to users.
+# LICENSE and CHANGELOG.txt are deliberately NOT here: the MIT licence has to
+# travel with the code, and the changelog is worth having offline.
+ignore:
+  - .github
+  - .vscode
+  - .claude
+  - .gitignore
+  - .gitattributes
+  - .pkgmeta
+  - CLAUDE.md
+  - README.md
+
+# No libraries, so there is nothing to check out and no separate no-libraries
+# package to build.
+enable-nolib-creation: no

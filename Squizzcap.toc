@@ -1,0 +1,9 @@
+## Interface: 120100, 120105
+## Title: Squizzcap - Death Recap
+## Notes: Pops up a detailed death recap when you die. Stays open through release and resurrection until manually closed.
+## Author: Squizzcap
+## Version: 1.0.0
+## SavedVariablesPerCharacter: SquizzcapDB
+## RequiredDeps:
+
+Squizzcap.lua

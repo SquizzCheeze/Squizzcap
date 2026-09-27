@@ -1,0 +1,14 @@
+Squizzcap - Changelog
+=====================
+
+
+V1.0.0
+------
+
+First public release.
+
+- Pops up a detailed death recap when you die, built from Blizzard's own
+  death recap data.
+- The window stays open through release, resurrection and zoning until you
+  close it.
+- /squizzcap or /scr opens it again.
