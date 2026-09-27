@@ -1,0 +1,277 @@
+--[[
+  Squizzcap - Data.lua
+
+  Reads Blizzard's death recap (C_DeathRecap) into a plain model the window
+  draws from. Field meanings follow Blizzard's own Blizzard_DeathRecap.lua:
+
+    * events come back NEWEST FIRST: events[1] is the hit that killed you
+      (Blizzard marks it causedDeath = i == 1).
+    * currentHP is your health WHEN THE HIT LANDED, i.e. before it -- their
+      tooltip reads "%s sec before death at %s%% health", and the killing
+      blow's "Killing blow at %s%% health" is not zero.
+    * avoidable / deadly are Blizzard-authored flags on the hit.
+    * timeBeforeDeath = newest timestamp - this timestamp.
+
+  12.1 can hand addon code SECRET values. Nothing here compares, measures
+  or does arithmetic on a value that might be secret: each is probed first,
+  and if any is secret the model is flagged `secret` and carries the raw
+  values for the window to pass straight into widget setters (which accept
+  secrets), with every calculated section switched off.
+]]
+
+local _, addon = ...
+local Data = {}
+addon.Data = Data
+
+local function IsSecret(v)
+    return issecretvalue and issecretvalue(v) or false
+end
+
+-- Environmental deaths carry no spell; these are the icons Blizzard's own
+-- recap uses for them.
+local ENV_ICONS = {
+    DROWNING = "spell_shadow_demonbreath",
+    FALLING  = "ability_rogue_quickrecovery",
+    FIRE     = "spell_fire_fire",
+    LAVA     = "spell_fire_fire",
+    SLIME    = "inv_misc_slime_01",
+    FATIGUE  = "ability_creature_cursed_05",
+}
+
+local SWING_SPELL = 88163 -- what Blizzard shows for a melee swing
+
+local function SpellTexture(spellId)
+    if not spellId then return nil end
+    local ok, tex = pcall(C_Spell.GetSpellTexture, spellId)
+    if ok then return tex end
+    return nil
+end
+
+local function SpellName(spellId)
+    if not spellId or IsSecret(spellId) then return nil end
+    local ok, name = pcall(C_Spell.GetSpellName, spellId)
+    if ok then return name end
+    return nil
+end
+
+-- One recap event -> one hit. `secret` is set on the hit if anything in it
+-- could not be read as a plain value.
+local function BuildHit(ev, maxHealth)
+    local hit = { secret = false }
+    local numeric = { "amount", "overkill", "absorbed", "resisted", "blocked", "currentHP", "timestamp", "school" }
+    for _, k in ipairs(numeric) do
+        local v = ev[k]
+        if IsSecret(v) then hit.secret = true end
+        hit[k] = v
+    end
+    for _, k in ipairs({ "event", "spellId", "spellName", "sourceName", "hideCaster", "avoidable", "deadly", "environmentalType" }) do
+        if IsSecret(ev[k]) then hit.secret = true end
+    end
+
+    hit.spellId = ev.spellId
+    hit.name = ev.spellName
+    hit.source = ev.sourceName
+
+    if hit.secret then
+        -- Pass-through only. No event-type branching (a string compare) and
+        -- no flag tests; the window shows what it can without reading.
+        hit.icon = SpellTexture(ev.spellId)
+        return hit
+    end
+
+    local event = ev.event
+    if event == "SWING_DAMAGE" then
+        hit.spellId = SWING_SPELL
+        hit.name = ACTION_SWING or MELEE or "Melee"
+    elseif event == "ENVIRONMENTAL_DAMAGE" then
+        local env = string.upper(ev.environmentalType or "")
+        hit.name = _G["ACTION_ENVIRONMENTAL_DAMAGE_" .. env] or ev.environmentalType or UNKNOWN
+        hit.icon = "Interface\\Icons\\" .. (ENV_ICONS[env] or "ability_creature_cursed_05")
+        hit.environment = true
+    end
+    hit.name = hit.name or SpellName(hit.spellId) or UNKNOWN
+    hit.icon = hit.icon or SpellTexture(hit.spellId) or "Interface\\Icons\\INV_Misc_QuestionMark"
+
+    if ev.hideCaster then
+        hit.source = nil
+    elseif hit.environment then
+        hit.source = ENVIRONMENT_SUBHEADER or "Environment"
+    else
+        hit.source = ev.sourceName or COMBATLOG_UNKNOWN_UNIT or UNKNOWN
+    end
+
+    hit.avoidable = ev.avoidable and true or false
+    hit.deadly = ev.deadly and true or false
+
+    hit.amount    = hit.amount or 0
+    hit.overkill  = (hit.overkill and hit.overkill > 0) and hit.overkill or 0
+    hit.absorbed  = hit.absorbed or 0
+    hit.resisted  = hit.resisted or 0
+    hit.blocked   = hit.blocked or 0
+    hit.school    = hit.school or 1
+
+    -- Health as a percentage of max, before and after the hit. The damage
+    -- that actually came off your health is the amount minus any overkill.
+    if maxHealth and maxHealth > 0 and hit.currentHP then
+        hit.hpBefore = math.min(100, hit.currentHP / maxHealth * 100)
+        local taken = math.max(0, hit.amount - hit.overkill)
+        hit.hpAfter = math.max(0, hit.hpBefore - taken / maxHealth * 100)
+    end
+    return hit
+end
+
+-- Aggregations for the glance layer. Only ever called on a non-secret model.
+local function Summarise(model)
+    local hits = model.hits
+    local total, mitigated = 0, 0
+    local bySpell, bySource = {}, {}
+    local highest = 1
+
+    for i, h in ipairs(hits) do
+        total = total + h.amount
+        mitigated = mitigated + h.absorbed + h.resisted + h.blocked
+        if h.amount > hits[highest].amount then highest = i end
+
+        local sk = h.name
+        local s = bySpell[sk]
+        if not s then
+            s = { name = h.name, school = h.school, amount = 0, count = 0 }
+            bySpell[sk] = s
+        end
+        s.amount, s.count = s.amount + h.amount, s.count + 1
+
+        local rk = h.source or UNKNOWN
+        local r = bySource[rk]
+        if not r then
+            r = { name = rk, amount = 0, count = 0, spells = {} }
+            bySource[rk] = r
+        end
+        r.amount, r.count = r.amount + h.amount, r.count + 1
+        local rs = r.spells[sk]
+        if not rs then
+            rs = { name = h.name, school = h.school, amount = 0, count = 0 }
+            r.spells[sk] = rs
+        end
+        rs.amount, rs.count = rs.amount + h.amount, rs.count + 1
+    end
+
+    local function Sorted(map)
+        local list = {}
+        for _, v in pairs(map) do list[#list + 1] = v end
+        table.sort(list, function(a, b) return a.amount > b.amount end)
+        return list
+    end
+
+    model.total = total
+    model.mitigated = mitigated
+    model.highest = highest
+    model.spells = Sorted(bySpell)
+    model.sources = Sorted(bySource)
+    for _, src in ipairs(model.sources) do
+        src.spells = Sorted(src.spells)
+    end
+
+    -- How fast: the last moment you were still at 90%+ health, and how long
+    -- before death that was. Walk oldest -> newest and keep the latest.
+    local healthy
+    for i = #hits, 1, -1 do
+        local h = hits[i]
+        if h.hpBefore and h.hpBefore >= 90 then healthy = h end
+    end
+    if healthy then
+        model.speed = { from = healthy.hpBefore, seconds = healthy.tbd }
+    elseif hits[#hits] and hits[#hits].hpBefore then
+        -- Never at 90%+ inside the recap: measure from its oldest hit.
+        local oldest = hits[#hits]
+        model.speed = { from = oldest.hpBefore, seconds = oldest.tbd }
+    end
+    if model.speed then
+        model.speed.burst = model.speed.seconds <= 3
+    end
+end
+
+-- Returns the model for the most recent death (recapID nil), or nil + reason.
+function Data.Read(recapID)
+    if not (C_DeathRecap and C_DeathRecap.GetRecapEvents) then
+        return nil, "death recap API not available"
+    end
+    local okHas, has = pcall(C_DeathRecap.HasRecapEvents, recapID)
+    if not okHas or not has or IsSecret(has) then
+        return nil, "no death recap available"
+    end
+    local okEv, events = pcall(C_DeathRecap.GetRecapEvents, recapID)
+    if not okEv or type(events) ~= "table" or #events == 0 then
+        return nil, "no death recap events"
+    end
+    local okMax, maxHealth = pcall(C_DeathRecap.GetRecapMaxHealth, recapID)
+    if not okMax then maxHealth = nil end
+
+    local model = {
+        hits = {},
+        secret = IsSecret(maxHealth),
+        maxHealth = maxHealth,
+        when = time(),
+        zone = GetRealZoneText and GetRealZoneText() or nil,
+    }
+    local okLink, link = pcall(C_DeathRecap.GetRecapLink, recapID)
+    if okLink and not IsSecret(link) then model.link = link end
+
+    local usableMax = (not model.secret) and maxHealth or nil
+    for i, ev in ipairs(events) do
+        local hit = BuildHit(ev, usableMax)
+        hit.causedDeath = (i == 1)
+        if hit.secret then model.secret = true end
+        model.hits[i] = hit
+    end
+
+    if not model.secret then
+        local newest = 0
+        for _, h in ipairs(model.hits) do
+            if h.timestamp and h.timestamp > newest then newest = h.timestamp end
+        end
+        for _, h in ipairs(model.hits) do
+            h.tbd = h.timestamp and (newest - h.timestamp) or 0
+        end
+        Summarise(model)
+    end
+
+    return model
+end
+
+-- ---------------------------------------------------------------------------
+-- Spell schools
+-- ---------------------------------------------------------------------------
+
+local SCHOOL_COLORS = {
+    [1]  = { 0.90, 0.80, 0.40 }, -- Physical
+    [2]  = { 1.00, 0.90, 0.50 }, -- Holy
+    [4]  = { 1.00, 0.50, 0.00 }, -- Fire
+    [8]  = { 0.30, 0.90, 0.30 }, -- Nature
+    [16] = { 0.50, 0.80, 1.00 }, -- Frost
+    [32] = { 0.70, 0.40, 1.00 }, -- Shadow
+    [64] = { 1.00, 0.50, 1.00 }, -- Arcane
+}
+local GREY = { 0.60, 0.60, 0.62 }
+
+-- A multi-school spell takes the colour of its highest school bit, so e.g.
+-- Shadowflame (fire + shadow) reads as shadow.
+---@return number r, number g, number b
+function Data.SchoolColor(school)
+    if type(school) ~= "number" or IsSecret(school) then return unpack(GREY) end
+    local best
+    for mask, c in pairs(SCHOOL_COLORS) do
+        if bit.band(school, mask) > 0 and (not best or mask > best) then best = mask end
+    end
+    return unpack(best and SCHOOL_COLORS[best] or GREY)
+end
+
+function Data.SchoolName(school)
+    if type(school) ~= "number" or IsSecret(school) then return nil end
+    if CombatLogUtil and CombatLogUtil.GetSpellSchoolString then
+        local ok, s = pcall(CombatLogUtil.GetSpellSchoolString, school)
+        if ok then return s end
+    end
+    return nil
+end
+
+Data.IsSecret = IsSecret

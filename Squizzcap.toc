@@ -6,5 +6,6 @@
 ## X-Curse-Project-ID: 1713974
 ## SavedVariablesPerCharacter: SquizzcapDB
 
-
+Data.lua
+Window.lua
 Squizzcap.lua
