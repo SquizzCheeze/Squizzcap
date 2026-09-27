@@ -11,4 +11,7 @@ First public release.
   death recap data.
 - The window stays open through release, resurrection and zoning until you
   close it.
-- /squizzcap or /scr opens it again.
+- Shows the killing blow, total damage taken, damage by source broken down by
+  spell, and a list of the hits leading up to your death.
+- /squizzcap test shows your last death again; /squizzcap (or /scr) opens the
+  options.
