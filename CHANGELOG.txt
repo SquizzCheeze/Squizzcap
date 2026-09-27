@@ -7,11 +7,21 @@ V1.0.0
 
 First public release.
 
-- Pops up a detailed death recap when you die, built from Blizzard's own
-  death recap data.
-- The window stays open through release, resurrection and zoning until you
-  close it.
-- Shows the killing blow, total damage taken, damage by source broken down by
-  spell, and a list of the hits leading up to your death.
-- /squizzcap test shows your last death again; /squizzcap (or /scr) opens the
-  options.
+- A death recap that opens the moment you die and stays open through
+  release, resurrection and loading screens until you close it.
+- Killed By: the spell that killed you, who cast it, the damage and
+  overkill, and Blizzard's Avoidable / Deadly markers.
+- At a glance: how fast you went down (e.g. 100% to 0 in 1.8s, burst or
+  worn down), total damage taken, and how much was absorbed, resisted or
+  blocked.
+- A health graph of the hits leading up to your death. Hover a hit for the
+  spell's tooltip, click it to jump to its details.
+- What Hit You: the damage split by spell at a glance.
+- Hits, Sources and All deaths tabs to dig into every hit, every enemy and
+  spell, and every earlier death.
+- Every death is saved for your character and grouped by dungeon or raid
+  visit, so you can look back over a whole key or raid night afterwards.
+- Link a death recap to chat, or post a one-line summary to your group.
+- Prefer something smaller? Choose the compact summary in the options; it
+  opens the full recap when clicked.
+- /squizzcap opens the options, /squizzcap show opens your last death.
