@@ -656,6 +656,12 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
     elseif arg == "toast" then
         local model, r, d = LastDeath()
         if model then addon.Window.ShowToast(model, r, d) else Say("No deaths saved yet.") end
+    elseif arg == "dump" then
+        -- TEMPORARY (2026-09-28): recap vs log, side by side, last death.
+        local lines = addon.Data.lastDump
+        if not lines then Say("Nothing to dump: die first (this session).") return end
+        Say("last death, oldest first (RECAP = Blizzard's hits, LOG = what UNIT_COMBAT reported):")
+        for _, l in ipairs(lines) do print("  " .. l) end
     elseif arg == "options" or arg == "" then
         ToggleOptions()
     else

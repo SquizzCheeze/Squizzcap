@@ -262,6 +262,7 @@ healFrame:SetScript("OnEvent", function(_, event, _, kind, flag, amount, school)
         e = { t = now, amount = amount, school = (not IsSecret(school)) and school or nil }
         woundLog[#woundLog + 1] = e
     end
+    if not IsSecret(flag) and type(flag) == "string" and flag ~= "" then e.flag = flag end -- TEMPORARY: for Data.lastDump
     if not fight.inCombat and not (fight.endedAt and now - fight.endedAt < 1) then
         -- Between fights: keep only what could belong to the next pull.
         fight.start = nil
@@ -478,6 +479,24 @@ local function AbsorbCheck(model, deathTime)
     local zero = LogZero(deathTime)
     model.absorbCheck = ReducedCheck(model, zero, "absorbed")
     model.blockCheck = ReducedCheck(model, zero, "blocked")
+
+    -- TEMPORARY: the recap's hits and the log around them, oldest first, for
+    -- /squizzcap dump. Times are seconds before the log's newest hit.
+    local lines = {}
+    local recapN = model.recapCount
+    local span = model.hits[recapN].tbd + 0.5
+    for i = recapN, 1, -1 do
+        local h = model.hits[i]
+        lines[#lines + 1] = string.format("RECAP -%.2fs  %s  abs %s  blk %s  res %s  overkill %s  (%s)",
+            h.tbd, h.amount, h.absorbed, h.blocked, h.resisted, h.overkill, h.name or "?")
+    end
+    for _, e in ipairs(recent) do
+        local tbd = zero - e.t
+        if tbd <= span then
+            lines[#lines + 1] = string.format("LOG   -%.2fs  %s%s  %s", tbd, e.heal and "heal +" or "hit -", e.amount, e.flag or "")
+        end
+    end
+    Data.lastDump = lines
 end
 
 local function ForwardHealth(model, deathTime)
