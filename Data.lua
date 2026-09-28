@@ -296,11 +296,15 @@ local function ExtendHits(model, deathTime)
         local tbd = zero - e.t
         if tbd > EXTEND_TO then break end
         if tbd > oldest.tbd + SAME_HIT then
-            -- Heals between this hit and the newer one, as health %.
+            -- Heals between this hit and the newer one, as health %. A heal
+            -- in the SAME frame as this hit shares its timestamp exactly;
+            -- it counts as after the hit, which is where AttachHeals puts it
+            -- too. (Leaving ties out dropped 172k of healing from the line
+            -- while the list still showed it -- in-game, 2026-09-28.)
             local healed = 0
             for _, hl in ipairs(healLog) do
                 local htbd = zero - hl.t
-                if htbd < tbd and htbd > newer.tbd then healed = healed + hl.amount end
+                if htbd <= tbd and htbd > newer.tbd then healed = healed + hl.amount end
             end
             local after = math.max(0, newer.hpBefore - healed / maxHealth * 100)
             local schoolName = Data.SchoolName(e.school)
