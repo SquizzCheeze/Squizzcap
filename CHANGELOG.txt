@@ -2,6 +2,19 @@ Squizzcap - Changelog
 =====================
 
 
+V1.1.0
+------
+
+New:
+
+- Healing you received is now part of the recap. The health graph rises
+  exactly when each heal landed (in green) instead of drawing an estimated
+  slope between hits, so the whole line is real data.
+- A Healing Received figure beside Damage Taken, and a "+48,300 healed"
+  line between hits in the Hits list showing what landed in each gap.
+- Deaths from before this update still show the old estimated graph.
+
+
 V1.0.0 (2026-09-27)
 ------------------
 

@@ -553,8 +553,8 @@ end
 -- Death handling
 -- ---------------------------------------------------------------------------
 
-local function OnDeath()
-    local model = addon.Data.Read()
+local function OnDeath(deathTime)
+    local model = addon.Data.Read(nil, deathTime)
     if not model then return end
     local run, runIndex = CurrentRun()
     table.insert(run.deaths, Saveable(model))
@@ -606,8 +606,11 @@ events:SetScript("OnEvent", function(self, event, arg1, arg2)
     elseif event == "CHALLENGE_MODE_START" then
         startNewRun = true
     elseif event == "PLAYER_DEAD" then
-        -- The recap is assembled as you die; give it a moment to land.
-        C_Timer.After(0.3, OnDeath)
+        -- The recap is assembled as you die; give it a moment to land. The
+        -- moment of death is taken NOW, not then: it is what lines the logged
+        -- incoming heals up against the recap's hits.
+        local deathTime = GetTime()
+        C_Timer.After(0.3, function() OnDeath(deathTime) end)
     end
 end)
 

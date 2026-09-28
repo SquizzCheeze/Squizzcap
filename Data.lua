@@ -193,8 +193,72 @@ local function Summarise(model)
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- Incoming heals
+--
+-- The recap has damage only. UNIT_COMBAT reports every heal landing on the
+-- player with a READABLE amount -- measured 2026-09-28 across the open world
+-- and an LFR boss encounter in combat: ~1,900 heals, none secret -- so a
+-- short rolling log of them fills the gaps between the recap's hits.
+--
+-- No healer name or spell: UNIT_COMBAT carries neither (and the combat-text
+-- API that does is always secret). Amounts are probed before use anyway, so
+-- a heal the game ever hides is skipped, never tripped over.
+-- ---------------------------------------------------------------------------
+
+local healLog = {}      -- oldest first: { t = GetTime(), amount, crit }
+local HEAL_KEEP = 30    -- seconds; comfortably longer than a 10-hit recap
+
+local healFrame = CreateFrame("Frame")
+healFrame:RegisterUnitEvent("UNIT_COMBAT", "player")
+healFrame:SetScript("OnEvent", function(_, _, _, kind, flag, amount)
+    if IsSecret(kind) or kind ~= "HEAL" then return end
+    if IsSecret(amount) or type(amount) ~= "number" or amount <= 0 then return end
+    local now = GetTime()
+    healLog[#healLog + 1] = { t = now, amount = amount, crit = (not IsSecret(flag)) and flag == "CRITICAL" }
+    local cutoff = now - HEAL_KEEP
+    while healLog[1] and healLog[1].t < cutoff do table.remove(healLog, 1) end
+end)
+
+-- Place the logged heals on the recap's timeline. `deathTime` is GetTime()
+-- at PLAYER_DEAD, which lines up with the recap's newest timestamp (the
+-- killing blow), so a heal's seconds-before-death is deathTime - its time.
+--
+-- Each heal goes into the gap it landed in: hit.gapHeals holds the heals
+-- between that hit and the one before it (oldest first), hit.gapHeal their
+-- sum. Heals from before the recap's first hit are left out -- the recap
+-- starts there, so nothing before it can be drawn against.
+local function AttachHeals(model, deathTime)
+    local hits = model.hits
+    local oldestTbd = hits[#hits].tbd
+    local total, count = 0, 0
+    for i = #healLog, 1, -1 do
+        local e = healLog[i]
+        local tbd = deathTime - e.t
+        if tbd > oldestTbd + 0.001 then break end
+        if tbd >= -0.05 then
+            tbd = math.max(0, tbd)
+            for g = 1, #hits - 1 do
+                local newer, older = hits[g], hits[g + 1]
+                if tbd >= newer.tbd and tbd <= older.tbd then
+                    newer.gapHeals = newer.gapHeals or {}
+                    table.insert(newer.gapHeals, 1, { tbd = tbd, amount = e.amount, crit = e.crit })
+                    newer.gapHeal = (newer.gapHeal or 0) + e.amount
+                    total, count = total + e.amount, count + 1
+                    break
+                end
+            end
+        end
+    end
+    model.healsKnown = true
+    model.healTotal = total
+    model.healCount = count
+end
+
 -- Returns the model for the most recent death (recapID nil), or nil + reason.
-function Data.Read(recapID)
+-- `deathTime` (GetTime() when you died) lets the incoming heals be placed;
+-- without it -- reopening a recap later -- they are simply not attached.
+function Data.Read(recapID, deathTime)
     if not (C_DeathRecap and C_DeathRecap.GetRecapEvents) then
         return nil, "death recap API not available"
     end
@@ -236,6 +300,7 @@ function Data.Read(recapID)
             h.tbd = h.timestamp and (newest - h.timestamp) or 0
         end
         Summarise(model)
+        if deathTime and model.hits[1].hpBefore then AttachHeals(model, deathTime) end
     end
 
     return model

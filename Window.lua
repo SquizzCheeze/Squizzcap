@@ -385,15 +385,23 @@ local function BuildStats()
     local row = CreateFrame("Frame", nil, frame)
     row:SetHeight(62)
     ui.stats = row
-    local w = (INNER - 16) / 3
+    -- How Fast carries the longest value ("100% > 0 in 3.5s"), so it gets
+    -- the extra width; the other three share the rest.
+    local speedW = 158
+    local w = (INNER - 24 - speedW) / 3
     ui.statSpeed = Stat(row, "HOW FAST")
     ui.statDamage = Stat(row, "DAMAGE TAKEN")
+    ui.statHeal = Stat(row, "HEALING RECEIVED")
     ui.statMitig = Stat(row, "MITIGATED")
-    for i, p in ipairs({ ui.statSpeed, ui.statDamage, ui.statMitig }) do
-        p:SetSize(w, 62)
-        p:SetPoint("TOPLEFT", (i - 1) * (w + 8), 0)
+    local x = 0
+    for i, p in ipairs({ ui.statSpeed, ui.statDamage, ui.statHeal, ui.statMitig }) do
+        local pw = (i == 1) and speedW or w
+        p:SetSize(pw, 62)
+        p:SetPoint("TOPLEFT", x, 0)
+        x = x + pw + 8
     end
-    ui.statMitig.sub:SetText("absorbed, resisted, blocked")
+    ui.statHeal.value:SetTextColor(C.hpGood[1], C.hpGood[2], C.hpGood[3])
+    ui.statMitig.sub:SetText("absorb, resist, block")
 end
 
 -- ----- health strip --------------------------------------------------------
@@ -406,9 +414,8 @@ local function BuildStrip()
     ui.strip = p
     local l = Label(p, "YOUR HEALTH")
     l:SetPoint("TOPLEFT", 12, -9)
-    local hint = Text(p, FONT.body, 12, C.muted, "RIGHT")
-    hint:SetPoint("TOPRIGHT", -12, -9)
-    hint:SetText("Exact at each hit  ·  dim between hits: healing, timing estimated")
+    ui.stripHint = Text(p, FONT.body, 12, C.muted, "RIGHT")
+    ui.stripHint:SetPoint("TOPRIGHT", -12, -9)
 
     local plot = CreateFrame("Frame", nil, p)
     plot:SetSize(PLOT_W, PLOT_H)
@@ -490,51 +497,97 @@ local function RenderStrip(model)
     local function X(tbd) return usableW * (1 - tbd / span) end
     local function Y(pct) return PLOT_H * (pct or 0) / 100 end
 
-    -- Polyline, oldest -> newest: flat from the left edge to the first hit,
-    -- then for each hit a vertical drop (the damage) and a slope to the next
-    -- hit's starting health (a rise there is healing received).
-    local pts = {}
-    local oldest = hits[n]
-    pts[1] = { 0, Y(oldest.hpBefore) }
-    for i = n, 1, -1 do
-        local h = hits[i]
-        pts[#pts + 1] = { X(h.tbd), Y(h.hpBefore) }
-        pts[#pts + 1] = { X(h.tbd), Y(i == 1 and 0 or h.hpAfter) }
+    -- The line as typed segments, oldest -> newest:
+    --   drop  -- a hit: your real health before and after it (the recap's
+    --            currentHP, which already includes every heal before it)
+    --   heal  -- a logged incoming heal, rising at the moment it landed
+    --   flat  -- measured: nothing landed here
+    --   est   -- a gap whose healing could not be placed (a death from before
+    --            heals were logged, or health moved with no logged heal to
+    --            explain it): the old straight slope, drawn dim
+    --
+    -- A gap's heals are scaled to the rise the recap itself measured (next
+    -- hit's health minus this hit's), so the line still lands exactly on
+    -- every hit; the log supplies WHEN each heal landed and how big it was
+    -- relative to the others, the recap supplies the total.
+    local segs = {}
+    local function Seg(x1, y1, x2, y2, kind)
+        if math.abs(x1 - x2) > 0.01 or math.abs(y1 - y2) > 0.01 then
+            segs[#segs + 1] = { x1, y1, x2, y2, kind }
+        end
     end
 
-    -- Only the hit drops are measured: currentHP is your real health when
-    -- each hit landed, healing included. What happened BETWEEN two hits is
-    -- not in the recap (no heal events), so those stretches are drawn dim --
-    -- the line is right at every hit and an estimate in between.
-    local li = 0
-    for i = 1, #pts - 1 do
-        local a, b = pts[i], pts[i + 1]
-        if math.abs(a[1] - b[1]) > 0.01 or math.abs(a[2] - b[2]) > 0.01 then
-            li = li + 1
-            local l = PoolLine(li)
-            local measured = math.abs(a[1] - b[1]) <= 0.01
-            -- Lightened toward white so it stands off the class-coloured fill.
-            l:SetThickness(measured and 3 or 1.5)
-            l:SetColorTexture(accent[1] * 0.6 + 0.4, accent[2] * 0.6 + 0.4, accent[3] * 0.6 + 0.4, measured and 1 or 0.5)
-            l:SetStartPoint("BOTTOMLEFT", ui.plot, a[1], a[2])
-            l:SetEndPoint("BOTTOMLEFT", ui.plot, b[1], b[2])
-            l:Show()
+    local oldest = hits[n]
+    Seg(0, Y(oldest.hpBefore), X(oldest.tbd), Y(oldest.hpBefore), "flat")
+    local anyEstimate = false
+    for i = n, 1, -1 do
+        local h = hits[i]
+        if i < n then
+            local older = hits[i + 1]
+            local from, to = older.hpAfter, h.hpBefore
+            local rise = to - from
+            local heals = h.gapHeals
+            if model.healsKnown and heals and #heals > 0 and (h.gapHeal or 0) > 0 and rise > 0.05 then
+                local cur, x0 = from, X(older.tbd)
+                for _, e in ipairs(heals) do
+                    local x = X(e.tbd)
+                    local share = rise * e.amount / h.gapHeal
+                    Seg(x0, Y(cur), x, Y(cur), "flat")
+                    Seg(x, Y(cur), x, Y(cur + share), "heal")
+                    cur, x0 = cur + share, x
+                end
+                Seg(x0, Y(to), X(h.tbd), Y(to), "flat")
+            elseif model.healsKnown and not heals and math.abs(rise) <= 0.05 then
+                Seg(X(older.tbd), Y(from), X(h.tbd), Y(to), "flat")
+            else
+                Seg(X(older.tbd), Y(from), X(h.tbd), Y(to), "est")
+                anyEstimate = true
+            end
         end
+        Seg(X(h.tbd), Y(h.hpBefore), X(h.tbd), Y(i == 1 and 0 or h.hpAfter), "drop")
+    end
+
+    if not model.healsKnown then
+        ui.stripHint:SetText("Exact at each hit  ·  dim between hits: healing, timing estimated")
+    elseif anyEstimate then
+        ui.stripHint:SetText("Drops are hits  ·  green rises are heals  ·  dim: estimated")
+    else
+        ui.stripHint:SetText("Drops are hits  ·  green rises are heals")
+    end
+
+    -- Lightened toward white so the line stands off the class-coloured fill.
+    local lr, lg, lb = accent[1] * 0.6 + 0.4, accent[2] * 0.6 + 0.4, accent[3] * 0.6 + 0.4
+    local li = 0
+    for _, s in ipairs(segs) do
+        li = li + 1
+        local l = PoolLine(li)
+        local kind = s[5]
+        if kind == "heal" then
+            l:SetThickness(3)
+            l:SetColorTexture(C.hpGood[1], C.hpGood[2], C.hpGood[3], 1)
+        elseif kind == "est" then
+            l:SetThickness(1.5)
+            l:SetColorTexture(lr, lg, lb, 0.5)
+        else
+            l:SetThickness(kind == "drop" and 3 or 2)
+            l:SetColorTexture(lr, lg, lb, 1)
+        end
+        l:SetStartPoint("BOTTOMLEFT", ui.plot, s[1], s[2])
+        l:SetEndPoint("BOTTOMLEFT", ui.plot, s[3], s[4])
+        l:Show()
     end
     for i = li + 1, #ui.lines do ui.lines[i]:Hide() end
 
     -- Shaded area: 2px columns under the line. WoW cannot fill an arbitrary
-    -- polygon, and a few hundred plain textures cost nothing.
+    -- polygon, and a few hundred plain textures cost nothing. Vertical
+    -- segments have no width, so the height at x comes from the last
+    -- sloped/flat segment spanning it.
     local function HeightAt(x)
-        local h = pts[1][2]
-        for i = 1, #pts - 1 do
-            local a, b = pts[i], pts[i + 1]
-            if x >= a[1] and x <= b[1] then
-                if b[1] - a[1] < 0.01 then
-                    h = b[2]
-                else
-                    h = a[2] + (b[2] - a[2]) * (x - a[1]) / (b[1] - a[1])
-                end
+        local h = segs[1] and segs[1][2] or 0
+        for _, s in ipairs(segs) do
+            local x1, y1, x2, y2 = s[1], s[2], s[3], s[4]
+            if x2 - x1 > 0.01 and x >= x1 and x <= x2 then
+                h = y1 + (y2 - y1) * (x - x1) / (x2 - x1)
             end
         end
         return h
@@ -797,11 +850,35 @@ local function Row(i)
     return r
 end
 
+-- One summary row per gap between two hits, for the heals that landed in it.
+-- One row, not one per heal: a raid's HoT ticks run to dozens a second, and
+-- the list is about the hits.
+local HEAL_ROW_H = 22
+
+local function HealRow(i)
+    ui.healRows = ui.healRows or {}
+    local r = ui.healRows[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, ui.list)
+    r:SetSize(INNER, HEAL_ROW_H)
+    r.bar = Fill(r, "ARTWORK", { C.hpGood[1], C.hpGood[2], C.hpGood[3], 0.7 })
+    r.bar:SetSize(2, HEAL_ROW_H - 8)
+    r.bar:SetPoint("LEFT", 66, 0)
+    r.text = Text(r, FONT.bodyBold, 12, C.hpGood)
+    r.text:SetPoint("LEFT", 90, 0)
+    r.sub = Text(r, FONT.body, 12, C.muted)
+    r.sub:SetPoint("LEFT", r.text, "RIGHT", 8, 0)
+    ui.healRows[i] = r
+    return r
+end
+
 local function RenderHits(model)
     local y = 0
+    local hr = 0
     for i, h in ipairs(model.hits) do
         local r = Row(i)
         r.hitIndex = i
+        r.y = y
         local open = (state.expanded == i)
         local sel = (state.selected == i)
         r:SetHeight(open and ROW_EXPANDED_H or ROW_H)
@@ -863,8 +940,25 @@ local function RenderHits(model)
         end
         r:Show()
         y = y + (open and ROW_EXPANDED_H or ROW_H) + 2
+
+        -- The list runs newest first, so the heals that landed BEFORE this
+        -- hit (after the older one) sit just below it.
+        if h.gapHeals and #h.gapHeals > 0 then
+            hr = hr + 1
+            local g = HealRow(hr)
+            g:ClearAllPoints()
+            g:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, -y)
+            g.text:SetText("+" .. Fmt(h.gapHeal) .. " healed")
+            local crits = 0
+            for _, e in ipairs(h.gapHeals) do if e.crit then crits = crits + 1 end end
+            local n = #h.gapHeals
+            g.sub:SetText((n == 1 and "1 heal" or (n .. " heals")) .. (crits > 0 and string.format("  ·  %d crit", crits) or ""))
+            g:Show()
+            y = y + HEAL_ROW_H + 2
+        end
     end
     for i = #model.hits + 1, #ui.rows do ui.rows[i]:Hide() end
+    for i = hr + 1, #(ui.healRows or {}) do ui.healRows[i]:Hide() end
     return y
 end
 
@@ -1141,9 +1235,17 @@ Render = function()
             ui.statSpeed.sub:SetText("")
         end
         ui.statDamage.value:SetText(Fmt(model.total))
-        local inWindow = 0
-        for _, h in ipairs(model.hits) do if sp and h.tbd <= sp.seconds then inWindow = inWindow + 1 end end
-        ui.statDamage.sub:SetText(sp and string.format("%d hits  ·  %d in the last %.1fs", #model.hits, inWindow, sp.seconds) or (#model.hits .. " hits"))
+        ui.statDamage.sub:SetText(#model.hits .. " hits")
+        if model.healsKnown then
+            ui.statHeal.value:SetText("+" .. Fmt(model.healTotal or 0))
+            local n = model.healCount or 0
+            ui.statHeal.sub:SetText(n == 1 and "1 heal" or (n .. " heals"))
+        else
+            -- A death saved before heals were logged, or one reopened later
+            -- without the moment of death to line them up against.
+            ui.statHeal.value:SetText("-")
+            ui.statHeal.sub:SetText("not recorded")
+        end
         ui.statMitig.value:SetText(Fmt(model.mitigated))
         if ui.strip:IsShown() then RenderStrip(model) end
         RenderShare(model)
@@ -1163,6 +1265,7 @@ Render = function()
     for _, r in ipairs(ui.rows) do r:Hide() end
     for _, p in ipairs(ui.srcPanels) do p:Hide() end
     for _, r in ipairs(ui.deathRows) do r:Hide() end
+    for _, r in ipairs(ui.healRows or {}) do r:Hide() end
     if ui.runHeader then ui.runHeader:Hide() end
     local h
     if state.tab == "sources" then h = RenderSources(model)
@@ -1202,8 +1305,9 @@ SelectHit = function(index, fromStrip)
     end
     Render()
     if fromStrip then
-        local y = 0
-        for i = 1, index - 1 do y = y + ((state.expanded == i) and ROW_EXPANDED_H or ROW_H) + 2 end
+        -- RenderHits records each row's offset, heal rows included.
+        local r = ui.rows[index]
+        local y = r and r.y or 0
         ui.scroll:SetVerticalScroll(math.min(y, ui.scroll:GetVerticalScrollRange()))
     end
 end
