@@ -565,9 +565,13 @@ local function OnDeath(deathTime)
             Say("health before the recap: worked BACK from the recap (" .. (model.forwardWhy or "?") .. miss .. ")")
         end
     end
-    local ac = model.absorbCheck
-    if ac and ac[1] + ac[2] + ac[3] > 0 then
-        Say(string.format("shielded hits in the recap: %d logged as damage THROUGH the shield, %d as the WHOLE hit, %d unmatched", ac[1], ac[2], ac[3]))
+    for _, c in ipairs({ { model.absorbCheck, "shielded" }, { model.blockCheck, "blocked" } }) do
+        local r, what = c[1], c[2]
+        if r and r[1] + r[2] + r[3] + r[4] > 0 then
+            Say(string.format("%s hits in the recap: %d logged as damage THROUGH, %d as the WHOLE hit, %d as only the %s PART, %d unmatched",
+                what, r[1], r[2], r[3], what, r[4]))
+            if r.sample then Say("   first unmatched: " .. r.sample) end
+        end
     end
     if model.maxAtPull and not model.secret then
         local function N(v) return type(v) == "number" and BreakUpLargeNumbers(v) or tostring(v) end

@@ -395,33 +395,46 @@ end
 
 local FWD_TOL = 3       -- % of max health the forward result may be off by
 
--- TEMPORARY (2026-09-28): is a PARTLY absorbed hit's UNIT_COMBAT amount the
--- damage that got through (as the recap's amount) or the whole hit before
--- the shield (amount + absorbed)? Compare the recap's shielded hits with
--- the log's copies of them. Fills model.absorbCheck = { through, whole,
--- neither }.
-local function AbsorbCheck(model, deathTime)
-    local zero = LogZero(deathTime)
-    local through, whole, neither = 0, 0, 0
+-- TEMPORARY (2026-09-28): what does UNIT_COMBAT report for a hit that was
+-- partly absorbed or partly blocked -- the damage that got through (the
+-- recap's amount), the whole hit (amount + the reduced part), or only the
+-- reduced part? Compare the recap's hits with the log's copies of them.
+-- Fills model.absorbCheck / model.blockCheck = { through, whole, part,
+-- unmatched, sample } where sample describes the first unmatched hit.
+local function ReducedCheck(model, zero, field)
+    local r = { 0, 0, 0, 0 }
     for i = 1, model.recapCount do
         local h = model.hits[i]
-        if h.absorbed > 0 and h.amount > 0 then
+        local reduced = h[field]
+        if reduced > 0 and h.amount > 0 then
             local found
+            local near = {}
             for w = #woundLog, 1, -1 do
                 local e = woundLog[w]
                 local d = (zero - e.t) - h.tbd
                 if d > 0.5 then break end
                 if d >= -0.5 then
-                    if e.amount == h.amount then found = "through" break end
-                    if e.amount == h.amount + h.absorbed then found = "whole" break end
+                    near[#near + 1] = e.amount
+                    if e.amount == h.amount then found = 1 break end
+                    if e.amount == h.amount + reduced then found = 2 break end
+                    if e.amount == reduced then found = 3 break end
                 end
             end
-            if found == "through" then through = through + 1
-            elseif found == "whole" then whole = whole + 1
-            else neither = neither + 1 end
+            found = found or 4
+            r[found] = r[found] + 1
+            if found == 4 and not r.sample then
+                r.sample = string.format("recap %d (+%d %s), log nearby: %s",
+                    h.amount, reduced, field, #near > 0 and table.concat(near, ", ") or "none")
+            end
         end
     end
-    model.absorbCheck = { through, whole, neither }
+    return r
+end
+
+local function AbsorbCheck(model, deathTime)
+    local zero = LogZero(deathTime)
+    model.absorbCheck = ReducedCheck(model, zero, "absorbed")
+    model.blockCheck = ReducedCheck(model, zero, "blocked")
 end
 
 local function ForwardHealth(model, deathTime)
