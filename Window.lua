@@ -496,6 +496,9 @@ local function RenderStrip(model)
     local span = 0
     for _, h in ipairs(hits) do if h.tbd > span then span = h.tbd end end
     span = math.max(3, math.ceil(span + 0.5))
+    -- An extended death is a fixed window: its oldest hit sits just inside
+    -- it, and the margin above would round it up to a sixth second.
+    if (model.extended or 0) > 0 then span = math.min(span, Data.EXTEND_TO) end
     local usableW = PLOT_W - 10
     local function X(tbd) return usableW * (1 - tbd / span) end
     local function Y(pct) return PLOT_H * (pct or 0) / 100 end

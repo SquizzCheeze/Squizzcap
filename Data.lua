@@ -250,6 +250,7 @@ end)
 -- ---------------------------------------------------------------------------
 
 local EXTEND_TO = 5     -- seconds before death
+Data.EXTEND_TO = EXTEND_TO -- the window sizes the graph to it
 local SAME_HIT = 0.1    -- a logged hit this close to the recap's oldest is that hit
 
 -- Line the logs up with the recap's clock. The newest logged hit is the
