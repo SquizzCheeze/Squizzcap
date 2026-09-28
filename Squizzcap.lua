@@ -34,6 +34,8 @@ local function Backfill(dst, src)
 end
 
 local function LoadDB()
+    -- Welcome.lua tells a first install from an update by this.
+    addon.hadSavedVariables = SquizzcapDB ~= nil
     SquizzcapDB = SquizzcapDB or {}
     addon.db = Backfill(SquizzcapDB, defaults)
 end
@@ -548,6 +550,7 @@ local function ToggleOptions()
     CreateOptionsPanel()
     optionsFrame:SetShown(not optionsFrame:IsShown())
 end
+addon.ToggleOptions = ToggleOptions -- the welcome window's Options button
 
 -- ---------------------------------------------------------------------------
 -- Death handling
@@ -633,6 +636,8 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
     elseif arg == "toast" then
         local model, r, d = LastDeath()
         if model then addon.Window.ShowToast(model, r, d) else Say("No deaths saved yet.") end
+    elseif arg == "notes" or arg == "changelog" then
+        addon.Welcome.ShowReleaseNotes()
     elseif arg == "options" or arg == "" then
         ToggleOptions()
     else
@@ -640,5 +645,6 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
         print("  |cffffffff/squizzcap|r - options")
         print("  |cffffffff/squizzcap show|r - open your last death (All deaths tab for the rest)")
         print("  |cffffffff/squizzcap toast|r - show your last death as the compact summary")
+        print("  |cffffffff/squizzcap notes|r - what's new in this version")
     end
 end

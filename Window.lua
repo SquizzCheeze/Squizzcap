@@ -1483,3 +1483,11 @@ function Window.ResetPosition()
     if frame then frame:ClearAllPoints(); frame:SetPoint("CENTER") end
     if toast then toast:ClearAllPoints(); toast:SetPoint("TOP", UIParent, "TOP", 0, -140) end
 end
+
+-- The look, for other windows (Welcome.lua) to match this one rather than
+-- carry a second copy of it.
+Window.Look = {
+    FONT = FONT, C = C, accent = accent,
+    Fill = Fill, AddBorder = AddBorder, Text = Text, SmallButton = SmallButton,
+    RefreshAccent = RefreshAccent,
+}

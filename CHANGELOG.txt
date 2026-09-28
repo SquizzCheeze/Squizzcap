@@ -12,6 +12,16 @@ New:
   slope between hits, so the whole line is real data.
 - A Healing Received figure beside Damage Taken, and a "+48,300 healed"
   line between hits in the Hits list showing what landed in each gap.
+  Heal amounts include overhealing, and the figure says so.
+- The recap now reaches back 5 seconds before your death instead of
+  stopping at Blizzard's last 10 hits, which in a burst can be well under a
+  second. Blizzard's 10 hits, including the killing blow, are unchanged;
+  older hits are added from the game's own hit feed, with a stand-in icon
+  for their damage school. The game names no spell or source for them and
+  can miss or add a hit in a burst, so they and your health at them are
+  marked with ~ as approximate.
+- A welcome window on first install and a short "what's new" note after
+  each update. /squizzcap notes opens it again.
 - Deaths from before this update still show the old estimated graph.
 
 
