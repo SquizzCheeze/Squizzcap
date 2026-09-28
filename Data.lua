@@ -370,11 +370,13 @@ end
 --
 -- Forward needs a starting health, and none is readable (every current-
 -- health API is SecretReturns, always). So assume full health when combat
--- started, play the whole fight's hits and heals through in arrival order,
--- and CHECK it: the result has to land on the recap's oldest hit, whose
--- health is exact. Only if it does (within FWD_TOL) does it replace the
+-- started, and play EVERY logged hit and heal through in arrival order --
+-- nothing skipped, no timing windows -- up to the killing blow. Then CHECK
+-- it: health just before the killing blow is in the recap, exactly. Only if
+-- the forward result lands on it (within FWD_TOL) does it replace the
 -- backward numbers; a pull you started hurt, a max-health change mid-fight
--- or a missed event all show up as a miss and leave the backward line.
+-- or anything else that moved health without a UNIT_COMBAT event shows up
+-- as a miss and leaves the backward line.
 -- ---------------------------------------------------------------------------
 
 local FWD_TOL = 3       -- % of max health the forward result may be off by
@@ -384,41 +386,49 @@ local function ForwardHealth(model, deathTime)
         model.forwardWhy = "no combat start seen"
         return
     end
+    -- The killing blow is the last hit logged. It is the same table in the
+    -- hit log and the fight log.
+    local killing = woundLog[#woundLog]
+    if not killing or LogZero(deathTime) ~= killing.t then
+        model.forwardWhy = "killing blow not logged"
+        return
+    end
     local hits = model.hits
-    local oldest = hits[model.recapCount]
     local maxHealth = model.maxHealth
-    local zero = LogZero(deathTime)
 
     local byEvent = {}
     for i = model.recapCount + 1, #hits do byEvent[hits[i].src] = hits[i] end
 
-    local cur, seen = 100, 0
+    local cur, seen, reached = 100, 0, false
     local fwd = {}
     for _, ev in ipairs(fight.events) do
-        local tbd = zero - ev.t
-        if tbd <= oldest.tbd then break end
+        if ev == killing then reached = true break end
         local pct = ev.amount / maxHealth * 100
         if ev.heal then
             cur = math.min(100, cur + pct)
-        elseif tbd > oldest.tbd + SAME_HIT then
-            local h = byEvent[ev]
+        else
             local before = cur
             cur = math.max(0, cur - pct)
+            local h = byEvent[ev]
             if h then
                 fwd[h] = { before, cur }
                 seen = seen + 1
             end
         end
     end
+    if not reached then
+        model.forwardWhy = "killing blow not in this fight's log"
+        return
+    end
 
-    model.forwardMiss = cur - oldest.hpBefore
+    model.forwardMiss = cur - hits[1].hpBefore
     if seen < model.extended then
         -- Some of the window came before the pull: nothing to play forward.
         model.forwardWhy = "combat started inside the window"
         return
     end
     if math.abs(model.forwardMiss) > FWD_TOL then
-        model.forwardWhy = "did not land on the recap"
+        model.forwardWhy = "did not land on the killing blow's health"
         return
     end
     for h, v in pairs(fwd) do h.hpBefore, h.hpAfter = v[1], v[2] end
