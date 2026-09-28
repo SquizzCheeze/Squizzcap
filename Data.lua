@@ -260,6 +260,29 @@ local function LogZero(deathTime)
     return deathTime
 end
 
+-- A logged hit has no spell, so it gets a stand-in icon for its school.
+-- Multi-school takes the highest bit, as Data.SchoolColor does.
+local SCHOOL_ICONS = {
+    [2]  = "spell_holy_holybolt",
+    [4]  = "spell_fire_firebolt02",
+    [8]  = "spell_nature_lightning",
+    [16] = "spell_frost_frostbolt02",
+    [32] = "spell_shadow_shadowbolt",
+    [64] = "spell_nature_starfall",
+}
+
+local function SchoolIcon(school)
+    local best
+    if type(school) == "number" then
+        for mask in pairs(SCHOOL_ICONS) do
+            if bit.band(school, mask) > 0 and (not best or mask > best) then best = mask end
+        end
+    end
+    if best then return "Interface\\Icons\\" .. SCHOOL_ICONS[best] end
+    -- Physical, or no school: the melee swing, as the recap shows melee.
+    return SpellTexture(SWING_SPELL) or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
 local function ExtendHits(model, deathTime)
     local hits = model.hits
     local oldest = hits[#hits]
@@ -287,7 +310,7 @@ local function ExtendHits(model, deathTime)
                 overkill = 0, absorbed = 0, resisted = 0, blocked = 0,
                 name = schoolName and (schoolName .. " damage") or "Damage",
                 source = "Source unknown",
-                icon = "Interface\\Icons\\INV_Misc_QuestionMark",
+                icon = SchoolIcon(e.school),
                 avoidable = false, deadly = false,
                 hpAfter = after,
                 hpBefore = math.min(100, after + e.amount / maxHealth * 100),
