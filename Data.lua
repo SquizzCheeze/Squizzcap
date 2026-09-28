@@ -338,7 +338,14 @@ local function ExtendHits(model, deathTime)
                 local htbd = zero - hl.t
                 if htbd <= tbd and htbd > newer.tbd then healed = healed + hl.amount end
             end
+            -- Overhealing can only happen at full health. If these heals
+            -- left you at 100%, some may have been overheal and taking them
+            -- off in full may be wrong; below 100% they were all real.
+            if healed > 0 and newer.hpBefore >= 99.95 then model.touchedFull = true end
             local after = math.max(0, newer.hpBefore - healed / maxHealth * 100)
+            -- Adding the hit back overshooting 100% means the numbers don't
+            -- add up at this step: not exact either.
+            if after + e.amount / maxHealth * 100 > 100.05 then model.touchedFull = true end
             local schoolName = Data.SchoolName(e.school)
             local hit = {
                 secret = false, extended = true,
@@ -451,6 +458,13 @@ local function ForwardHealth(model, deathTime)
     end
 
     model.forwardMiss = cur - hits[1].hpBefore
+    if not model.touchedFull then
+        -- Never at full in the window, so no heal in it could overheal and
+        -- the backward line is exact. Forward only adds drift from the whole
+        -- fight (measured with the miss above, for testing).
+        model.forwardWhy = "exact: never at full in the window"
+        return
+    end
     if seen < model.extended then
         -- Some of the window came before the pull: nothing to play forward.
         model.forwardWhy = "combat started inside the window"
@@ -547,7 +561,14 @@ function Data.Read(recapID, deathTime)
         model.recapCount = #model.hits
         if deathTime and model.hits[1].hpBefore then
             ExtendHits(model, deathTime)
-            if (model.extended or 0) > 0 then ForwardHealth(model, deathTime) end
+            if (model.extended or 0) > 0 then
+                ForwardHealth(model, deathTime)
+                -- Backward without ever reaching full is exact, not a guess.
+                model.healthExact = model.healthMethod == "backward" and not model.touchedFull
+                for i = model.recapCount + 1, #model.hits do
+                    model.hits[i].estimated = not model.healthExact
+                end
+            end
             AbsorbCheck(model, deathTime)
             -- Log entries are live tables; a saved death must not keep them.
             for _, h in ipairs(model.hits) do h.src = nil end
