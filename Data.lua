@@ -233,6 +233,13 @@ healFrame:SetScript("OnEvent", function(_, event, _, kind, flag, amount, school)
     local now = GetTime()
     if event == "PLAYER_REGEN_DISABLED" then
         fight.start = now
+        -- TEMPORARY (2026-09-28): max health at the pull, when readable
+        -- (UnitHealthMax is only secret while restricted), to compare with
+        -- the recap's at death -- does it change mid-fight?
+        local ok, maxHp = pcall(UnitHealthMax, "player")
+        if not ok then fight.maxAtPull = "error"
+        elseif IsSecret(maxHp) then fight.maxAtPull = "secret"
+        else fight.maxAtPull = maxHp end
         fight.inCombat = true
         Trim(fight.events, now - PULL_GRACE)
         return
@@ -570,6 +577,7 @@ function Data.Read(recapID, deathTime)
                 end
             end
             AbsorbCheck(model, deathTime)
+            model.maxAtPull = fight.start and fight.maxAtPull or "no pull seen"
             -- Log entries are live tables; a saved death must not keep them.
             for _, h in ipairs(model.hits) do h.src = nil end
         end

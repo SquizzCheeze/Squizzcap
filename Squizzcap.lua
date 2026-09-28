@@ -569,6 +569,11 @@ local function OnDeath(deathTime)
     if ac and ac[1] + ac[2] + ac[3] > 0 then
         Say(string.format("shielded hits in the recap: %d logged as damage THROUGH the shield, %d as the WHOLE hit, %d unmatched", ac[1], ac[2], ac[3]))
     end
+    if model.maxAtPull and not model.secret then
+        local function N(v) return type(v) == "number" and BreakUpLargeNumbers(v) or tostring(v) end
+        local same = model.maxAtPull == model.maxHealth and "  (same)" or ""
+        Say("max health: " .. N(model.maxAtPull) .. " at the pull, " .. N(model.maxHealth) .. " at death" .. same)
+    end
     local run, runIndex = CurrentRun()
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths
