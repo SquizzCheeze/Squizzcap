@@ -234,7 +234,10 @@ local function SpellTooltip(owner, hit)
             GameTooltip:AddLine(string.format("%.1fs before death, at %s%d%% health", hit.tbd or 0, hit.extended and "about " or "", math.floor(hit.hpBefore + 0.5)), 1, 0.82, 0)
         end
         if hit.extended then
-            GameTooltip:AddLine("Older than Blizzard's recap, which keeps only the last 10 hits. The game reports no spell or source for it, and your health here is worked back from the recap.", C.muted[1], C.muted[2], C.muted[3], true)
+            local how = ui.model and ui.model.healthMethod == "forward"
+                and "worked forward from full health at the pull, and checked against the recap"
+                or "worked back from the recap"
+            GameTooltip:AddLine("Older than Blizzard's recap, which keeps only the last 10 hits. The game reports no spell or source for it, and your health here is " .. how .. ".", C.muted[1], C.muted[2], C.muted[3], true)
         end
         if hit.avoidable and DEATH_RECAP_AVOIDABLE_SPELL then
             GameTooltip:AddLine(CreateAtlasMarkup(BADGE.avoidable.atlas, 16, 16) .. " " .. DEATH_RECAP_AVOIDABLE_SPELL, 1, 1, 1, true)

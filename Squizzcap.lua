@@ -556,6 +556,15 @@ end
 local function OnDeath(deathTime)
     local model = addon.Data.Read(nil, deathTime)
     if not model then return end
+    -- TEMPORARY (2026-09-28): which health method won, while it is tested.
+    if (model.extended or 0) > 0 then
+        local miss = model.forwardMiss and string.format(", forward was off by %.1f%%", model.forwardMiss) or ""
+        if model.healthMethod == "forward" then
+            Say("health before the recap: worked FORWARD from full at the pull" .. miss)
+        else
+            Say("health before the recap: worked BACK from the recap (" .. (model.forwardWhy or "?") .. miss .. ")")
+        end
+    end
     local run, runIndex = CurrentRun()
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths

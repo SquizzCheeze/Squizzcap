@@ -218,17 +218,48 @@ end
 -- Hits ("WOUND") are logged too, for the stretch before the recap's oldest
 -- hit (see ExtendHits). Their amounts are just as readable: 81/81 in a
 -- Mythic dungeon, in and out of combat, 2026-09-28.
+-- The whole current fight as well, in arrival order (so hits and heals in
+-- the same frame keep their real order), for ForwardHealth. It starts over
+-- when combat starts and is only trimmed while out of combat, so a death's
+-- fight is still whole when the recap is read after it.
+local fight = { start = nil, events = {} }
+local PULL_GRACE = 0.5  -- the hit that starts combat can land just before it
+
 local healFrame = CreateFrame("Frame")
 healFrame:RegisterUnitEvent("UNIT_COMBAT", "player")
-healFrame:SetScript("OnEvent", function(_, _, _, kind, flag, amount, school)
+healFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+healFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+healFrame:SetScript("OnEvent", function(_, event, _, kind, flag, amount, school)
+    local now = GetTime()
+    if event == "PLAYER_REGEN_DISABLED" then
+        fight.start = now
+        fight.inCombat = true
+        Trim(fight.events, now - PULL_GRACE)
+        return
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Not cleared here: dying ends combat too, and the death is read
+        -- after that. The fight stays open a moment, so a killing blow that
+        -- arrives just after combat drops still counts as part of it.
+        fight.inCombat = false
+        fight.endedAt = now
+        return
+    end
     if IsSecret(kind) or (kind ~= "HEAL" and kind ~= "WOUND") then return end
     if IsSecret(amount) or type(amount) ~= "number" or amount <= 0 then return end
-    local now = GetTime()
+    local e
     if kind == "HEAL" then
-        healLog[#healLog + 1] = { t = now, amount = amount, crit = (not IsSecret(flag)) and flag == "CRITICAL" }
+        e = { t = now, amount = amount, heal = true, crit = (not IsSecret(flag)) and flag == "CRITICAL" }
+        healLog[#healLog + 1] = e
     else
-        woundLog[#woundLog + 1] = { t = now, amount = amount, school = (not IsSecret(school)) and school or nil }
+        e = { t = now, amount = amount, school = (not IsSecret(school)) and school or nil }
+        woundLog[#woundLog + 1] = e
     end
+    if not fight.inCombat and not (fight.endedAt and now - fight.endedAt < 1) then
+        -- Between fights: keep only what could belong to the next pull.
+        fight.start = nil
+        Trim(fight.events, now - PULL_GRACE)
+    end
+    fight.events[#fight.events + 1] = e
     Trim(healLog, now - LOG_KEEP)
     Trim(woundLog, now - LOG_KEEP)
 end)
@@ -319,12 +350,79 @@ local function ExtendHits(model, deathTime)
                 avoidable = false, deadly = false,
                 hpAfter = after,
                 hpBefore = math.min(100, after + e.amount / maxHealth * 100),
+                src = e,
             }
             hits[#hits + 1] = hit
             newer = hit
         end
     end
     model.extended = #hits - model.recapCount
+    model.healthMethod = "backward"
+end
+
+-- ---------------------------------------------------------------------------
+-- Forward from the pull
+--
+-- Working backwards can't tell a heal that lifted you to full from one that
+-- landed while you already were (both read as "100% after it"), and takes
+-- the whole heal off either way. Going FORWARD that ambiguity disappears: a
+-- heal simply stops at 100%, exactly as the game applies it.
+--
+-- Forward needs a starting health, and none is readable (every current-
+-- health API is SecretReturns, always). So assume full health when combat
+-- started, play the whole fight's hits and heals through in arrival order,
+-- and CHECK it: the result has to land on the recap's oldest hit, whose
+-- health is exact. Only if it does (within FWD_TOL) does it replace the
+-- backward numbers; a pull you started hurt, a max-health change mid-fight
+-- or a missed event all show up as a miss and leave the backward line.
+-- ---------------------------------------------------------------------------
+
+local FWD_TOL = 3       -- % of max health the forward result may be off by
+
+local function ForwardHealth(model, deathTime)
+    if not fight.start then
+        model.forwardWhy = "no combat start seen"
+        return
+    end
+    local hits = model.hits
+    local oldest = hits[model.recapCount]
+    local maxHealth = model.maxHealth
+    local zero = LogZero(deathTime)
+
+    local byEvent = {}
+    for i = model.recapCount + 1, #hits do byEvent[hits[i].src] = hits[i] end
+
+    local cur, seen = 100, 0
+    local fwd = {}
+    for _, ev in ipairs(fight.events) do
+        local tbd = zero - ev.t
+        if tbd <= oldest.tbd then break end
+        local pct = ev.amount / maxHealth * 100
+        if ev.heal then
+            cur = math.min(100, cur + pct)
+        elseif tbd > oldest.tbd + SAME_HIT then
+            local h = byEvent[ev]
+            local before = cur
+            cur = math.max(0, cur - pct)
+            if h then
+                fwd[h] = { before, cur }
+                seen = seen + 1
+            end
+        end
+    end
+
+    model.forwardMiss = cur - oldest.hpBefore
+    if seen < model.extended then
+        -- Some of the window came before the pull: nothing to play forward.
+        model.forwardWhy = "combat started inside the window"
+        return
+    end
+    if math.abs(model.forwardMiss) > FWD_TOL then
+        model.forwardWhy = "did not land on the recap"
+        return
+    end
+    for h, v in pairs(fwd) do h.hpBefore, h.hpAfter = v[1], v[2] end
+    model.healthMethod = "forward"
 end
 
 -- Place the logged heals on the recap's timeline. LogZero(deathTime) lines
@@ -408,7 +506,12 @@ function Data.Read(recapID, deathTime)
             h.tbd = h.timestamp and (newest - h.timestamp) or 0
         end
         model.recapCount = #model.hits
-        if deathTime and model.hits[1].hpBefore then ExtendHits(model, deathTime) end
+        if deathTime and model.hits[1].hpBefore then
+            ExtendHits(model, deathTime)
+            if (model.extended or 0) > 0 then ForwardHealth(model, deathTime) end
+            -- Log entries are live tables; a saved death must not keep them.
+            for _, h in ipairs(model.hits) do h.src = nil end
+        end
         Summarise(model)
         if deathTime and model.hits[1].hpBefore then AttachHeals(model, deathTime) end
     end
