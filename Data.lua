@@ -381,6 +381,35 @@ end
 
 local FWD_TOL = 3       -- % of max health the forward result may be off by
 
+-- TEMPORARY (2026-09-28): is a PARTLY absorbed hit's UNIT_COMBAT amount the
+-- damage that got through (as the recap's amount) or the whole hit before
+-- the shield (amount + absorbed)? Compare the recap's shielded hits with
+-- the log's copies of them. Fills model.absorbCheck = { through, whole,
+-- neither }.
+local function AbsorbCheck(model, deathTime)
+    local zero = LogZero(deathTime)
+    local through, whole, neither = 0, 0, 0
+    for i = 1, model.recapCount do
+        local h = model.hits[i]
+        if h.absorbed > 0 and h.amount > 0 then
+            local found
+            for w = #woundLog, 1, -1 do
+                local e = woundLog[w]
+                local d = (zero - e.t) - h.tbd
+                if d > 0.5 then break end
+                if d >= -0.5 then
+                    if e.amount == h.amount then found = "through" break end
+                    if e.amount == h.amount + h.absorbed then found = "whole" break end
+                end
+            end
+            if found == "through" then through = through + 1
+            elseif found == "whole" then whole = whole + 1
+            else neither = neither + 1 end
+        end
+    end
+    model.absorbCheck = { through, whole, neither }
+end
+
 local function ForwardHealth(model, deathTime)
     if not fight.start then
         model.forwardWhy = "no combat start seen"
@@ -519,6 +548,7 @@ function Data.Read(recapID, deathTime)
         if deathTime and model.hits[1].hpBefore then
             ExtendHits(model, deathTime)
             if (model.extended or 0) > 0 then ForwardHealth(model, deathTime) end
+            AbsorbCheck(model, deathTime)
             -- Log entries are live tables; a saved death must not keep them.
             for _, h in ipairs(model.hits) do h.src = nil end
         end

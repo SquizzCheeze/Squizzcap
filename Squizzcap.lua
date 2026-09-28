@@ -565,6 +565,10 @@ local function OnDeath(deathTime)
             Say("health before the recap: worked BACK from the recap (" .. (model.forwardWhy or "?") .. miss .. ")")
         end
     end
+    local ac = model.absorbCheck
+    if ac and ac[1] + ac[2] + ac[3] > 0 then
+        Say(string.format("shielded hits in the recap: %d logged as damage THROUGH the shield, %d as the WHOLE hit, %d unmatched", ac[1], ac[2], ac[3]))
+    end
     local run, runIndex = CurrentRun()
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths
