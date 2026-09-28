@@ -181,8 +181,9 @@ local function Summarise(model)
     if healthy then
         model.speed = { from = healthy.hpBefore, seconds = healthy.tbd }
     elseif hits[#hits] and hits[#hits].hpBefore then
-        -- Never at 90%+ inside the recap. It only holds the last 10 hits
-        -- (measured in game 2026-09-27), so the slide began before it and
+        -- Never at 90%+ on the timeline. The recap only holds the last 10
+        -- hits (measured in game 2026-09-27) and ExtendHits reaches back to
+        -- 5s at most, so the slide began before it and
         -- its length is unknown: measure from the oldest hit, but say so
         -- rather than call it burst or worn down.
         local oldest = hits[#hits]
@@ -207,34 +208,113 @@ end
 -- ---------------------------------------------------------------------------
 
 local healLog = {}      -- oldest first: { t = GetTime(), amount, crit }
-local HEAL_KEEP = 30    -- seconds; comfortably longer than a 10-hit recap
+local woundLog = {}     -- oldest first: { t = GetTime(), amount, school }
+local LOG_KEEP = 30     -- seconds; comfortably longer than a 10-hit recap
 
+local function Trim(log, cutoff)
+    while log[1] and log[1].t < cutoff do table.remove(log, 1) end
+end
+
+-- Hits ("WOUND") are logged too, for the stretch before the recap's oldest
+-- hit (see ExtendHits). Their amounts are just as readable: 81/81 in a
+-- Mythic dungeon, in and out of combat, 2026-09-28.
 local healFrame = CreateFrame("Frame")
 healFrame:RegisterUnitEvent("UNIT_COMBAT", "player")
-healFrame:SetScript("OnEvent", function(_, _, _, kind, flag, amount)
-    if IsSecret(kind) or kind ~= "HEAL" then return end
+healFrame:SetScript("OnEvent", function(_, _, _, kind, flag, amount, school)
+    if IsSecret(kind) or (kind ~= "HEAL" and kind ~= "WOUND") then return end
     if IsSecret(amount) or type(amount) ~= "number" or amount <= 0 then return end
     local now = GetTime()
-    healLog[#healLog + 1] = { t = now, amount = amount, crit = (not IsSecret(flag)) and flag == "CRITICAL" }
-    local cutoff = now - HEAL_KEEP
-    while healLog[1] and healLog[1].t < cutoff do table.remove(healLog, 1) end
+    if kind == "HEAL" then
+        healLog[#healLog + 1] = { t = now, amount = amount, crit = (not IsSecret(flag)) and flag == "CRITICAL" }
+    else
+        woundLog[#woundLog + 1] = { t = now, amount = amount, school = (not IsSecret(school)) and school or nil }
+    end
+    Trim(healLog, now - LOG_KEEP)
+    Trim(woundLog, now - LOG_KEEP)
 end)
 
--- Place the logged heals on the recap's timeline. `deathTime` is GetTime()
--- at PLAYER_DEAD, which lines up with the recap's newest timestamp (the
--- killing blow), so a heal's seconds-before-death is deathTime - its time.
+-- ---------------------------------------------------------------------------
+-- Past the recap's 10 hits
+--
+-- The recap keeps the last 10 hits and no more, which in a burst can be a
+-- fraction of a second. Its hits stay exactly as Blizzard gives them (they
+-- carry the killing blow, names and sources); hits the log saw BEFORE the
+-- oldest of them are added behind it, back to EXTEND_TO seconds before
+-- death.
+--
+-- Those hits have no spell or source (UNIT_COMBAT carries neither), and
+-- your health before them is worked backwards from the recap's oldest hit:
+-- add the hit back, take the logged heals off. Heal amounts include
+-- overhealing, so that can undershoot; every such hit is marked `extended`
+-- and its health shown as an estimate.
+-- ---------------------------------------------------------------------------
+
+local EXTEND_TO = 5     -- seconds before death
+local SAME_HIT = 0.1    -- a logged hit this close to the recap's oldest is that hit
+
+-- Line the logs up with the recap's clock. The newest logged hit is the
+-- killing blow, which is the recap's zero; deathTime is only close to it.
+local function LogZero(deathTime)
+    local last = woundLog[#woundLog]
+    if last and math.abs(deathTime - last.t) < 1 then return last.t end
+    return deathTime
+end
+
+local function ExtendHits(model, deathTime)
+    local hits = model.hits
+    local oldest = hits[#hits]
+    if oldest.tbd >= EXTEND_TO or not oldest.hpBefore then return end
+    local maxHealth = model.maxHealth
+
+    local zero = LogZero(deathTime)
+    local newer = oldest
+    for i = #woundLog, 1, -1 do
+        local e = woundLog[i]
+        local tbd = zero - e.t
+        if tbd > EXTEND_TO then break end
+        if tbd > oldest.tbd + SAME_HIT then
+            -- Heals between this hit and the newer one, as health %.
+            local healed = 0
+            for _, hl in ipairs(healLog) do
+                local htbd = zero - hl.t
+                if htbd < tbd and htbd > newer.tbd then healed = healed + hl.amount end
+            end
+            local after = math.max(0, newer.hpBefore - healed / maxHealth * 100)
+            local schoolName = Data.SchoolName(e.school)
+            local hit = {
+                secret = false, extended = true,
+                tbd = tbd, amount = e.amount, school = e.school or 1,
+                overkill = 0, absorbed = 0, resisted = 0, blocked = 0,
+                name = schoolName and (schoolName .. " damage") or "Damage",
+                source = "Source unknown",
+                icon = "Interface\\Icons\\INV_Misc_QuestionMark",
+                avoidable = false, deadly = false,
+                hpAfter = after,
+                hpBefore = math.min(100, after + e.amount / maxHealth * 100),
+            }
+            hits[#hits + 1] = hit
+            newer = hit
+        end
+    end
+    model.extended = #hits - model.recapCount
+end
+
+-- Place the logged heals on the recap's timeline. LogZero(deathTime) lines
+-- up with the recap's newest timestamp (the killing blow), so a heal's
+-- seconds-before-death is that minus its time.
 --
 -- Each heal goes into the gap it landed in: hit.gapHeals holds the heals
 -- between that hit and the one before it (oldest first), hit.gapHeal their
--- sum. Heals from before the recap's first hit are left out -- the recap
--- starts there, so nothing before it can be drawn against.
+-- sum. Heals from before the oldest hit (the recap's, or the oldest one
+-- ExtendHits added) are left out: the timeline starts there.
 local function AttachHeals(model, deathTime)
     local hits = model.hits
     local oldestTbd = hits[#hits].tbd
+    local zero = LogZero(deathTime)
     local total, count = 0, 0
     for i = #healLog, 1, -1 do
         local e = healLog[i]
-        local tbd = deathTime - e.t
+        local tbd = zero - e.t
         if tbd > oldestTbd + 0.001 then break end
         if tbd >= -0.05 then
             tbd = math.max(0, tbd)
@@ -299,6 +379,8 @@ function Data.Read(recapID, deathTime)
         for _, h in ipairs(model.hits) do
             h.tbd = h.timestamp and (newest - h.timestamp) or 0
         end
+        model.recapCount = #model.hits
+        if deathTime and model.hits[1].hpBefore then ExtendHits(model, deathTime) end
         Summarise(model)
         if deathTime and model.hits[1].hpBefore then AttachHeals(model, deathTime) end
     end
