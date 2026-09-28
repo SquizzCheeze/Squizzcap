@@ -231,14 +231,10 @@ local function SpellTooltip(owner, hit)
         GameTooltip:AddLine(Fmt(hit.amount) .. " damage" .. (hit.overkill > 0 and (" (" .. Fmt(hit.overkill) .. " overkill)") or ""), C.dmg[1], C.dmg[2], C.dmg[3])
         if hit.source then GameTooltip:AddLine(hit.source, C.muted[1], C.muted[2], C.muted[3]) end
         if hit.hpBefore then
-            GameTooltip:AddLine(string.format("%.1fs before death, at %s%d%% health", hit.tbd or 0, (hit.extended and hit.estimated ~= false) and "about " or "", math.floor(hit.hpBefore + 0.5)), 1, 0.82, 0)
+            GameTooltip:AddLine(string.format("%.1fs before death, at %s%d%% health", hit.tbd or 0, hit.extended and "about " or "", math.floor(hit.hpBefore + 0.5)), 1, 0.82, 0)
         end
         if hit.extended then
-            local how = ui.model and ui.model.healthMethod == "forward"
-                and "worked forward from full health at the pull, and checked against the recap"
-                or (hit.estimated == false and "worked back from the recap, exactly (you were never at full health in these last seconds, so no heal could overheal)")
-                or "worked back from the recap"
-            GameTooltip:AddLine("Older than Blizzard's recap, which keeps only the last 10 hits. The game reports no spell or source for it, and your health here is " .. how .. ".", C.muted[1], C.muted[2], C.muted[3], true)
+            GameTooltip:AddLine("Older than Blizzard's recap, which keeps only the last 10 hits. This comes from the game's own hit feed, which names no spell or source and can miss or add a hit in a burst, so treat it and the health here (worked back from the recap) as approximate.", C.muted[1], C.muted[2], C.muted[3], true)
         end
         if hit.avoidable and DEATH_RECAP_AVOIDABLE_SPELL then
             GameTooltip:AddLine(CreateAtlasMarkup(BADGE.avoidable.atlas, 16, 16) .. " " .. DEATH_RECAP_AVOIDABLE_SPELL, 1, 1, 1, true)
@@ -925,7 +921,7 @@ local function RenderHits(model)
                 r.hpFill:SetWidth(math.max(1, 64 * pct / 100))
                 local c = pct < 35 and C.hpLow or C.hpGood
                 r.hpFill:SetColorTexture(c[1], c[2], c[3], 1)
-                r.hpText:SetText(string.format("%s%d%% HP", (h.extended and h.estimated ~= false) and "~" or "", math.floor(pct + 0.5)))
+                r.hpText:SetText(string.format("%s%d%% HP", h.extended and "~" or "", math.floor(pct + 0.5)))
                 r.hpTrack:Show(); r.hpFill:Show(); r.hpText:Show()
             else
                 r.hpTrack:Hide(); r.hpFill:Hide(); r.hpText:Hide()
@@ -939,7 +935,7 @@ local function RenderHits(model)
                 r.dResBlk:SetText(h.resisted or "")
                 r.dOverkill:SetText(h.overkill or "")
             else
-                r.dHealth:SetText(h.hpBefore and string.format("%s%d%%  >  %d%%", (h.extended and h.estimated ~= false) and "~" or "", math.floor(h.hpBefore + 0.5), math.floor((h.causedDeath and 0 or h.hpAfter) + 0.5)) or "-")
+                r.dHealth:SetText(h.hpBefore and string.format("%s%d%%  >  %d%%", h.extended and "~" or "", math.floor(h.hpBefore + 0.5), math.floor((h.causedDeath and 0 or h.hpAfter) + 0.5)) or "-")
                 r.dAbsorb:SetText(h.absorbed > 0 and Fmt(h.absorbed) or "-")
                 r.dResBlk:SetText((h.resisted > 0 and Fmt(h.resisted) or "-") .. " / " .. (h.blocked > 0 and Fmt(h.blocked) or "-"))
                 r.dOverkill:SetText(h.overkill > 0 and Fmt(h.overkill) or "-")

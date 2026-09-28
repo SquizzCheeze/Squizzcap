@@ -556,29 +556,6 @@ end
 local function OnDeath(deathTime)
     local model = addon.Data.Read(nil, deathTime)
     if not model then return end
-    -- TEMPORARY (2026-09-28): which health method won, while it is tested.
-    if model.extendWhy then Say("not extended past the recap: " .. model.extendWhy) end
-    if (model.extended or 0) > 0 then
-        local miss = model.forwardMiss and string.format(", forward was off by %.1f%%", model.forwardMiss) or ""
-        if model.healthMethod == "forward" then
-            Say("health before the recap: worked FORWARD from full at the pull" .. miss)
-        else
-            Say("health before the recap: worked BACK from the recap (" .. (model.forwardWhy or "?") .. miss .. ")")
-        end
-    end
-    for _, c in ipairs({ { model.absorbCheck, "shielded" }, { model.blockCheck, "blocked" } }) do
-        local r, what = c[1], c[2]
-        if r and r[1] + r[2] + r[3] + r[4] > 0 then
-            Say(string.format("%s hits in the recap: %d logged as damage THROUGH, %d as the WHOLE hit, %d as only the %s PART, %d unmatched",
-                what, r[1], r[2], r[3], what, r[4]))
-            if r.sample then Say("   first unmatched: " .. r.sample) end
-        end
-    end
-    if model.maxAtPull and not model.secret then
-        local function N(v) return type(v) == "number" and BreakUpLargeNumbers(v) or tostring(v) end
-        local same = model.maxAtPull == model.maxHealth and "  (same)" or ""
-        Say("max health: " .. N(model.maxAtPull) .. " at the pull, " .. N(model.maxHealth) .. " at death" .. same)
-    end
     local run, runIndex = CurrentRun()
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths
@@ -656,12 +633,6 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
     elseif arg == "toast" then
         local model, r, d = LastDeath()
         if model then addon.Window.ShowToast(model, r, d) else Say("No deaths saved yet.") end
-    elseif arg == "dump" then
-        -- TEMPORARY (2026-09-28): recap vs log, side by side, last death.
-        local lines = addon.Data.lastDump
-        if not lines then Say("Nothing to dump: die first (this session).") return end
-        Say("last death, oldest first (RECAP = Blizzard's hits, LOG = what UNIT_COMBAT reported):")
-        for _, l in ipairs(lines) do print("  " .. l) end
     elseif arg == "options" or arg == "" then
         ToggleOptions()
     else
