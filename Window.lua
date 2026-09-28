@@ -1238,8 +1238,10 @@ Render = function()
         ui.statDamage.sub:SetText(#model.hits .. " hits")
         if model.healsKnown then
             ui.statHeal.value:SetText("+" .. Fmt(model.healTotal or 0))
-            local n = model.healCount or 0
-            ui.statHeal.sub:SetText(n == 1 and "1 heal" or (n .. " heals"))
+            -- UNIT_COMBAT heal amounts include overhealing (confirmed in game
+            -- 2026-09-28: full-size amounts at full health), so say so. The
+            -- column is ~104px, too narrow for the heal count as well.
+            ui.statHeal.sub:SetText("incl. overheal")
         else
             -- A death saved before heals were logged, or one reopened later
             -- without the moment of death to line them up against.
