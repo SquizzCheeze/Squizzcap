@@ -209,6 +209,7 @@ end
 
 local healLog = {}      -- oldest first: { t = GetTime(), amount, crit }
 local woundLog = {}     -- oldest first: { t = GetTime(), amount, school }
+local recent = {}       -- both, in ARRIVAL order (same tables as the two above)
 local LOG_KEEP = 30     -- seconds; comfortably longer than a 10-hit recap
 
 local function Trim(log, cutoff)
@@ -267,8 +268,10 @@ healFrame:SetScript("OnEvent", function(_, event, _, kind, flag, amount, school)
         Trim(fight.events, now - PULL_GRACE)
     end
     fight.events[#fight.events + 1] = e
+    recent[#recent + 1] = e
     Trim(healLog, now - LOG_KEEP)
     Trim(woundLog, now - LOG_KEEP)
+    Trim(recent, now - LOG_KEEP)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -284,12 +287,18 @@ end)
 -- your health before them is worked backwards from the recap's oldest hit:
 -- add the hit back, take the logged heals off. Heal amounts include
 -- overhealing, so that can undershoot; every such hit is marked `extended`
--- and its health shown as an estimate.
+-- and its health shown as an estimate unless it is provably exact.
+--
+-- The walk goes through the log in ARRIVAL order, one event at a time, from
+-- the log's own copy of the recap's oldest hit: no event is skipped, and
+-- several in one frame keep the order they really happened in. (It used to
+-- match by timestamps, which skipped any hit within 0.1s of the recap's
+-- oldest and had to guess same-frame order.)
 -- ---------------------------------------------------------------------------
 
 local EXTEND_TO = 5     -- seconds before death
 Data.EXTEND_TO = EXTEND_TO -- the window sizes the graph to it
-local SAME_HIT = 0.1    -- a logged hit this close to the recap's oldest is that hit
+local FIND_WITHIN = 0.5 -- how far (s) the log's copy of a recap hit may sit from it
 
 -- Line the logs up with the recap's clock. The newest logged hit is the
 -- killing blow, which is the recap's zero; deathTime is only close to it.
@@ -322,37 +331,70 @@ local function SchoolIcon(school)
     return SpellTexture(SWING_SPELL) or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
+-- The log's copy of a recap hit: a hit near it in time whose amount is the
+-- recap's (confirmed for shielded hits), or the recap's plus or minus the
+-- part a shield or block took (in case blocks are logged differently).
+-- Returns its index in `recent`, the closest in time if several fit.
+local function FindInLog(h, zero)
+    local want = {
+        [h.amount] = true,
+        [h.amount + h.absorbed] = true,
+        [h.amount + h.blocked] = true,
+        [h.amount + h.absorbed + h.blocked] = true,
+    }
+    if h.blocked > 0 then want[h.blocked] = true end
+    local best, bestD
+    for i = #recent, 1, -1 do
+        local e = recent[i]
+        local d = math.abs((zero - e.t) - h.tbd)
+        if (zero - e.t) - h.tbd > FIND_WITHIN then break end
+        if not e.heal and d <= FIND_WITHIN and want[e.amount] and (not bestD or d < bestD) then
+            best, bestD = i, d
+        end
+    end
+    return best
+end
+
 local function ExtendHits(model, deathTime)
     local hits = model.hits
     local oldest = hits[#hits]
     if oldest.tbd >= EXTEND_TO or not oldest.hpBefore then return end
     local maxHealth = model.maxHealth
-
     local zero = LogZero(deathTime)
-    local newer = oldest
-    for i = #woundLog, 1, -1 do
-        local e = woundLog[i]
+
+    local start = FindInLog(oldest, zero)
+    if not start then
+        model.extendWhy = "the recap's oldest hit was not found in the log"
+        return
+    end
+    model.logStart = start
+
+    -- Walk back one logged event at a time. Heals are held until the next
+    -- older hit turns up, since only then is it known they sit in a gap on
+    -- the timeline (heals older than the oldest hit shown are not drawn).
+    local cur, newer = oldest.hpBefore, oldest
+    local pending, pendingSum = {}, 0
+    for j = start - 1, 1, -1 do
+        local e = recent[j]
         local tbd = zero - e.t
         if tbd > EXTEND_TO then break end
-        if tbd > oldest.tbd + SAME_HIT then
-            -- Heals between this hit and the newer one, as health %. A heal
-            -- in the SAME frame as this hit shares its timestamp exactly;
-            -- it counts as after the hit, which is where AttachHeals puts it
-            -- too. (Leaving ties out dropped 172k of healing from the line
-            -- while the list still showed it -- in-game, 2026-09-28.)
-            local healed = 0
-            for _, hl in ipairs(healLog) do
-                local htbd = zero - hl.t
-                if htbd <= tbd and htbd > newer.tbd then healed = healed + hl.amount end
+        local pct = e.amount / maxHealth * 100
+        if e.heal then
+            -- Overhealing can only happen at full health. If this heal left
+            -- you at 100%, some may have been overheal and taking it off in
+            -- full may be wrong; below 100% it was all real.
+            if cur >= 99.95 then model.touchedFull = true end
+            cur = math.max(0, cur - pct)
+            table.insert(pending, 1, { tbd = tbd, amount = e.amount, crit = e.crit })
+            pendingSum = pendingSum + e.amount
+        else
+            if #pending > 0 then
+                newer.gapHeals, newer.gapHeal = pending, pendingSum
+                pending, pendingSum = {}, 0
             end
-            -- Overhealing can only happen at full health. If these heals
-            -- left you at 100%, some may have been overheal and taking them
-            -- off in full may be wrong; below 100% they were all real.
-            if healed > 0 and newer.hpBefore >= 99.95 then model.touchedFull = true end
-            local after = math.max(0, newer.hpBefore - healed / maxHealth * 100)
             -- Adding the hit back overshooting 100% means the numbers don't
             -- add up at this step: not exact either.
-            if after + e.amount / maxHealth * 100 > 100.05 then model.touchedFull = true end
+            if cur + pct > 100.05 then model.touchedFull = true end
             local schoolName = Data.SchoolName(e.school)
             local hit = {
                 secret = false, extended = true,
@@ -362,10 +404,11 @@ local function ExtendHits(model, deathTime)
                 source = "Source unknown",
                 icon = SchoolIcon(e.school),
                 avoidable = false, deadly = false,
-                hpAfter = after,
-                hpBefore = math.min(100, after + e.amount / maxHealth * 100),
+                hpAfter = cur,
+                hpBefore = math.min(100, cur + pct),
                 src = e,
             }
+            cur = hit.hpBefore
             hits[#hits + 1] = hit
             newer = hit
         end
@@ -506,27 +549,38 @@ end
 -- between that hit and the one before it (oldest first), hit.gapHeal their
 -- sum. Heals from before the oldest hit (the recap's, or the oldest one
 -- ExtendHits added) are left out: the timeline starts there.
+--
+-- This places heals between the RECAP's hits only. The gaps behind the
+-- recap got theirs from ExtendHits' walk; when it ran (model.logStart), only
+-- heals that arrived AFTER the log's copy of the recap's oldest hit are
+-- placed here, so a heal in the same frame is never counted twice.
 local function AttachHeals(model, deathTime)
     local hits = model.hits
-    local oldestTbd = hits[#hits].tbd
+    local recapN = model.recapCount
+    local oldestTbd = hits[recapN].tbd
     local zero = LogZero(deathTime)
-    local total, count = 0, 0
-    for i = #healLog, 1, -1 do
-        local e = healLog[i]
+    local first = model.logStart and (model.logStart + 1) or 1
+    for i = #recent, first, -1 do
+        local e = recent[i]
         local tbd = zero - e.t
-        if tbd > oldestTbd + 0.001 then break end
-        if tbd >= -0.05 then
-            tbd = math.max(0, tbd)
-            for g = 1, #hits - 1 do
+        if not model.logStart and tbd > oldestTbd + 0.001 then break end
+        if e.heal and tbd >= -0.05 then
+            tbd = math.max(0, math.min(tbd, oldestTbd))
+            for g = 1, recapN - 1 do
                 local newer, older = hits[g], hits[g + 1]
                 if tbd >= newer.tbd and tbd <= older.tbd then
                     newer.gapHeals = newer.gapHeals or {}
                     table.insert(newer.gapHeals, 1, { tbd = tbd, amount = e.amount, crit = e.crit })
                     newer.gapHeal = (newer.gapHeal or 0) + e.amount
-                    total, count = total + e.amount, count + 1
                     break
                 end
             end
+        end
+    end
+    local total, count = 0, 0
+    for _, h in ipairs(hits) do
+        if h.gapHeals then
+            total, count = total + h.gapHeal, count + #h.gapHeals
         end
     end
     model.healsKnown = true

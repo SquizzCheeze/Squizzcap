@@ -557,6 +557,7 @@ local function OnDeath(deathTime)
     local model = addon.Data.Read(nil, deathTime)
     if not model then return end
     -- TEMPORARY (2026-09-28): which health method won, while it is tested.
+    if model.extendWhy then Say("not extended past the recap: " .. model.extendWhy) end
     if (model.extended or 0) > 0 then
         local miss = model.forwardMiss and string.format(", forward was off by %.1f%%", model.forwardMiss) or ""
         if model.healthMethod == "forward" then
