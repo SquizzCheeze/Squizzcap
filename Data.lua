@@ -299,10 +299,13 @@ end)
 
 local EXTEND_TO = 5     -- seconds before death
 Data.EXTEND_TO = EXTEND_TO -- the window sizes the graph to it
-local FIND_WITHIN = 0.5 -- how far (s) the log's copy of a recap hit may sit from it
+local FIND_WITHIN = 1.0 -- how far (s) the log's copy of a recap hit may sit from it
 
--- Line the logs up with the recap's clock. The newest logged hit is the
--- killing blow, which is the recap's zero; deathTime is only close to it.
+-- A COARSE line-up of the logs with the recap's clock, only good enough to
+-- search near: the newest logged hit, else the moment of death. It is NOT
+-- reliably the killing blow -- UNIT_COMBAT can miss the last hits entirely
+-- (the killing blow and the hit before it never arrived, in game
+-- 2026-09-28), which put everything 0.3s out. AlignLog sets the real one.
 local function LogZero(deathTime)
     local last = woundLog[#woundLog]
     if last and math.abs(deathTime - last.t) < 1 then return last.t end
@@ -335,40 +338,54 @@ end
 -- The log's copy of a recap hit: a hit near it in time whose amount is the
 -- recap's (confirmed for shielded hits), or the recap's plus or minus the
 -- part a shield or block took (in case blocks are logged differently).
--- Returns its index in `recent`, the closest in time if several fit.
+-- Returns its index in `recent`. An exact amount beats a variant; among
+-- equals, the closest in time wins.
 local function FindInLog(h, zero)
-    local want = {
-        [h.amount] = true,
+    local variants = {
         [h.amount + h.absorbed] = true,
         [h.amount + h.blocked] = true,
         [h.amount + h.absorbed + h.blocked] = true,
     }
-    if h.blocked > 0 then want[h.blocked] = true end
-    local best, bestD
+    if h.blocked > 0 then variants[h.blocked] = true end
+    local best, bestRank, bestD
     for i = #recent, 1, -1 do
         local e = recent[i]
-        local d = math.abs((zero - e.t) - h.tbd)
-        if (zero - e.t) - h.tbd > FIND_WITHIN then break end
-        if not e.heal and d <= FIND_WITHIN and want[e.amount] and (not bestD or d < bestD) then
-            best, bestD = i, d
+        local off = (zero - e.t) - h.tbd
+        if off > FIND_WITHIN then break end
+        local d = math.abs(off)
+        if not e.heal and d <= FIND_WITHIN then
+            local rank = (e.amount == h.amount) and 1 or (variants[e.amount] and 2) or nil
+            if rank and (not best or rank < bestRank or (rank == bestRank and d < bestD)) then
+                best, bestRank, bestD = i, rank, d
+            end
         end
     end
     return best
 end
 
-local function ExtendHits(model, deathTime)
+-- Line the log up with the recap on a hit both have: the recap's oldest,
+-- found in the log. model.logStart is its index in `recent` (the walks
+-- start or stop there, by position, not by time) and model.logZero the log
+-- time of the recap's zero, so a log event's seconds-before-death is
+-- logZero - its time.
+local function AlignLog(model, deathTime)
+    local oldest = model.hits[model.recapCount]
+    local start = FindInLog(oldest, LogZero(deathTime))
+    if not start then return end
+    model.logStart = start
+    model.logZero = recent[start].t + oldest.tbd
+end
+
+local function ExtendHits(model)
     local hits = model.hits
     local oldest = hits[#hits]
     if oldest.tbd >= EXTEND_TO or not oldest.hpBefore then return end
     local maxHealth = model.maxHealth
-    local zero = LogZero(deathTime)
-
-    local start = FindInLog(oldest, zero)
+    local start, zero = model.logStart, model.logZero
     if not start then
         model.extendWhy = "the recap's oldest hit was not found in the log"
         return
     end
-    model.logStart = start
 
     -- Walk back one logged event at a time. Heals are held until the next
     -- older hit turns up, since only then is it known they sit in a gap on
@@ -429,9 +446,12 @@ end
 -- Forward needs a starting health, and none is readable (every current-
 -- health API is SecretReturns, always). So assume full health when combat
 -- started, and play EVERY logged hit and heal through in arrival order --
--- nothing skipped, no timing windows -- up to the killing blow. Then CHECK
--- it: health just before the killing blow is in the recap, exactly. Only if
--- the forward result lands on it (within FWD_TOL) does it replace the
+-- nothing skipped, no timing windows -- up to the log's copy of the recap's
+-- oldest hit (AlignLog). Then CHECK it: health just before that hit is in
+-- the recap, exactly. (It used to run to the "killing blow", taken as the
+-- newest logged hit; UNIT_COMBAT can miss the last hits, so that compared
+-- two different moments and read as ~14% of drift that wasn't there.)
+-- Only if the forward result lands on it (within FWD_TOL) does it replace the
 -- backward numbers; a pull you started hurt, a max-health change mid-fight
 -- or anything else that moved health without a UNIT_COMBAT event shows up
 -- as a miss and leaves the backward line.
@@ -456,8 +476,8 @@ local function ReducedCheck(model, zero, field)
             for w = #woundLog, 1, -1 do
                 local e = woundLog[w]
                 local d = (zero - e.t) - h.tbd
-                if d > 0.5 then break end
-                if d >= -0.5 then
+                if d > FIND_WITHIN then break end
+                if d >= -FIND_WITHIN then
                     near[#near + 1] = e.amount
                     if e.amount == h.amount then found = 1 break end
                     if e.amount == h.amount + reduced then found = 2 break end
@@ -476,19 +496,22 @@ local function ReducedCheck(model, zero, field)
 end
 
 local function AbsorbCheck(model, deathTime)
-    local zero = LogZero(deathTime)
+    local zero = model.logZero or LogZero(deathTime)
     model.absorbCheck = ReducedCheck(model, zero, "absorbed")
     model.blockCheck = ReducedCheck(model, zero, "blocked")
 
     -- TEMPORARY: the recap's hits and the log around them, oldest first, for
-    -- /squizzcap dump. Times are seconds before the log's newest hit.
+    -- /squizzcap dump. Times are seconds before the recap's killing blow
+    -- (the log lined up on the recap's oldest hit when it was found).
     local lines = {}
     local recapN = model.recapCount
     local span = model.hits[recapN].tbd + 0.5
+    lines[1] = model.logZero and "(log lined up on the recap's oldest hit)" or "(recap's oldest hit NOT found in the log; times are rough)"
     for i = recapN, 1, -1 do
         local h = model.hits[i]
-        lines[#lines + 1] = string.format("RECAP -%.2fs  %s  abs %s  blk %s  res %s  overkill %s  (%s)",
-            h.tbd, h.amount, h.absorbed, h.blocked, h.resisted, h.overkill, h.name or "?")
+        lines[#lines + 1] = string.format("RECAP -%.2fs  %s  abs %s  blk %s  res %s  overkill %s  health before %s (%.1f%%)  (%s)",
+            h.tbd, h.amount, h.absorbed, h.blocked, h.resisted, h.overkill,
+            h.currentHP or "?", h.hpBefore or 0, h.name or "?")
     end
     for _, e in ipairs(recent) do
         local tbd = zero - e.t
@@ -499,16 +522,16 @@ local function AbsorbCheck(model, deathTime)
     Data.lastDump = lines
 end
 
-local function ForwardHealth(model, deathTime)
+local function ForwardHealth(model)
     if not fight.start then
         model.forwardWhy = "no combat start seen"
         return
     end
-    -- The killing blow is the last hit logged. It is the same table in the
-    -- hit log and the fight log.
-    local killing = woundLog[#woundLog]
-    if not killing or LogZero(deathTime) ~= killing.t then
-        model.forwardWhy = "killing blow not logged"
+    -- Stop at the log's copy of the recap's oldest hit. It is the same table
+    -- in `recent` and the fight log.
+    local target = model.logStart and recent[model.logStart]
+    if not target then
+        model.forwardWhy = "the recap's oldest hit was not found in the log"
         return
     end
     local hits = model.hits
@@ -520,7 +543,7 @@ local function ForwardHealth(model, deathTime)
     local cur, seen, reached = 100, 0, false
     local fwd = {}
     for _, ev in ipairs(fight.events) do
-        if ev == killing then reached = true break end
+        if ev == target then reached = true break end
         local pct = ev.amount / maxHealth * 100
         if ev.heal then
             cur = math.min(100, cur + pct)
@@ -535,11 +558,11 @@ local function ForwardHealth(model, deathTime)
         end
     end
     if not reached then
-        model.forwardWhy = "killing blow not in this fight's log"
+        model.forwardWhy = "combat started after the recap's oldest hit"
         return
     end
 
-    model.forwardMiss = cur - hits[1].hpBefore
+    model.forwardMiss = cur - hits[model.recapCount].hpBefore
     if not model.touchedFull then
         -- Never at full in the window, so no heal in it could overheal and
         -- the backward line is exact. Forward only adds drift from the whole
@@ -553,16 +576,16 @@ local function ForwardHealth(model, deathTime)
         return
     end
     if math.abs(model.forwardMiss) > FWD_TOL then
-        model.forwardWhy = "did not land on the killing blow's health"
+        model.forwardWhy = "did not land on the recap's health"
         return
     end
     for h, v in pairs(fwd) do h.hpBefore, h.hpAfter = v[1], v[2] end
     model.healthMethod = "forward"
 end
 
--- Place the logged heals on the recap's timeline. LogZero(deathTime) lines
--- up with the recap's newest timestamp (the killing blow), so a heal's
--- seconds-before-death is that minus its time.
+-- Place the logged heals on the recap's timeline. model.logZero (AlignLog)
+-- is the log time of the recap's killing blow, so a heal's seconds-before-
+-- death is that minus its time; without it, the coarse LogZero.
 --
 -- Each heal goes into the gap it landed in: hit.gapHeals holds the heals
 -- between that hit and the one before it (oldest first), hit.gapHeal their
@@ -577,7 +600,7 @@ local function AttachHeals(model, deathTime)
     local hits = model.hits
     local recapN = model.recapCount
     local oldestTbd = hits[recapN].tbd
-    local zero = LogZero(deathTime)
+    local zero = model.logZero or LogZero(deathTime)
     local first = model.logStart and (model.logStart + 1) or 1
     for i = #recent, first, -1 do
         local e = recent[i]
@@ -653,9 +676,10 @@ function Data.Read(recapID, deathTime)
         end
         model.recapCount = #model.hits
         if deathTime and model.hits[1].hpBefore then
-            ExtendHits(model, deathTime)
+            AlignLog(model, deathTime)
+            ExtendHits(model)
             if (model.extended or 0) > 0 then
-                ForwardHealth(model, deathTime)
+                ForwardHealth(model)
                 -- Backward without ever reaching full is exact, not a guess.
                 model.healthExact = model.healthMethod == "backward" and not model.touchedFull
                 for i = model.recapCount + 1, #model.hits do
