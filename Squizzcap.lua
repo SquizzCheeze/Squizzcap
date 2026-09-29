@@ -673,6 +673,42 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
     elseif arg == "toast" then
         local model, r, d = LastDeath()
         if model then addon.Window.ShowToast(model, r, d) else Say("No deaths saved yet.") end
+    elseif arg == "probe" then
+        -- TEMPORARY (2026-09-29): can we read OTHER group members' death
+        -- recaps? Blizzard's meter opens any Deaths entry with its
+        -- deathRecapID (NeverSecret); this checks what an addon gets back.
+        local IsSecret = addon.Data.IsSecret
+        local function S(v) if IsSecret(v) then return "SECRET" end return tostring(v) end
+        local DM = C_DamageMeter
+        if not (DM and Enum.DamageMeterType and Enum.DamageMeterType.Deaths) then Say("probe: no damage meter API") return end
+        Say(string.format("probe: in combat=%s", tostring(InCombatLockdown())))
+        for _, st in ipairs({ { "current", Enum.DamageMeterSessionType.Current }, { "overall", Enum.DamageMeterSessionType.Overall } }) do
+            local ok, session = pcall(DM.GetCombatSessionFromType, st[2], Enum.DamageMeterType.Deaths)
+            if not ok or type(session) ~= "table" then
+                Say("probe " .. st[1] .. ": session error " .. tostring(session))
+            else
+                local sources = session.combatSources or {}
+                Say(string.format("probe %s: %d deaths listed", st[1], #sources))
+                for i, src in ipairs(sources) do
+                    local id = src.deathRecapID
+                    local line = string.format("  #%d %s (%s) me=%s recapID=%s", i, S(src.name), S(src.classFilename), S(src.isLocalPlayer), S(id))
+                    if id and not IsSecret(id) and id ~= 0 then
+                        local okH, has = pcall(C_DeathRecap.HasRecapEvents, id)
+                        local okE, events = pcall(C_DeathRecap.GetRecapEvents, id)
+                        local okM, maxHp = pcall(C_DeathRecap.GetRecapMaxHealth, id)
+                        local n = (okE and type(events) == "table") and #events or -1
+                        local kb = (n > 0) and events[1] or nil
+                        line = line .. string.format(" | has=%s events=%s maxHP=%s", okH and S(has) or "ERR",
+                            okE and tostring(n) or ("ERR " .. tostring(events)), okM and S(maxHp) or "ERR")
+                        if kb then
+                            line = line .. string.format(" | KB spell=%s amount=%s hp=%s src=%s",
+                                S(kb.spellName), S(kb.amount), S(kb.currentHP), S(kb.sourceName))
+                        end
+                    end
+                    print(line)
+                end
+            end
+        end
     elseif arg == "notes" or arg == "changelog" then
         addon.Welcome.ShowReleaseNotes()
     elseif arg == "options" or arg == "" then
