@@ -19,6 +19,11 @@ New:
 - Avoidable hits are counted: each death in All deaths shows how many of
   its last hits were avoidable, the run summary adds them up, and This
   fight shows how much of the fight's damage was avoidable.
+- More control over saved deaths: Delete this run and Clear all buttons at
+  the bottom of the All deaths tab (each needs a second click), a Keep
+  history option (the last 5, 10, 20 or 50 runs; 20 as before), and an
+  optional Start fresh each Mythic+ key that clears earlier runs when a
+  key starts, so All deaths only ever shows the key you are in.
 
 
 V1.1.0 (2026-09-28)

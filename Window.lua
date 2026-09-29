@@ -1254,6 +1254,44 @@ local function DeathRow(i)
     return r
 end
 
+-- A button that needs a second click within 4s, so one stray click can't
+-- throw away a night's history (same rule as the options panel's Clear).
+local function ConfirmButton(parent, w, label, armedLabel, onConfirm)
+    local b = SmallButton(parent, w, 26, label)
+    b.label:SetTextColor(C.hpLow[1], C.hpLow[2], C.hpLow[3], 1)
+    b:SetScript("OnClick", function(self)
+        if self.armed then
+            self.armed = nil
+            self.label:SetText(label)
+            onConfirm()
+        else
+            self.armed = true
+            self.label:SetText(armedLabel)
+            C_Timer.After(4, function()
+                if self.armed then
+                    self.armed = nil
+                    self.label:SetText(label)
+                end
+            end)
+        end
+    end)
+    return b
+end
+
+local function HistoryFooter()
+    if ui.historyFooter then return ui.historyFooter end
+    local f = CreateFrame("Frame", nil, ui.list)
+    f:SetSize(INNER, 30)
+    f.delete = ConfirmButton(f, 150, "Delete this run", "Click again to delete",
+        function() addon.DeleteRun(state.viewRun) end)
+    f.delete:SetPoint("LEFT", 0, 0)
+    f.clear = ConfirmButton(f, 150, "Clear all", "Click again to clear",
+        function() addon.ClearSavedDeaths() end)
+    f.clear:SetPoint("RIGHT", 0, 0)
+    ui.historyFooter = f
+    return f
+end
+
 local function Ago(t)
     local s = time() - (t or time())
     if s < 60 then return "just now" end
@@ -1327,7 +1365,12 @@ local function RenderHistory()
         y = y + 48 + 6
     end
     for i = shown + 1, #ui.deathRows do ui.deathRows[i]:Hide() end
-    return y
+
+    local footer = HistoryFooter()
+    footer:ClearAllPoints()
+    footer:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, -(y + 4))
+    footer:Show()
+    return y + 4 + 30
 end
 
 -- ----- layout + render -----------------------------------------------------
@@ -1447,6 +1490,7 @@ Render = function()
     for _, r in ipairs(ui.healRows or {}) do r:Hide() end
     if ui.runHeader then ui.runHeader:Hide() end
     if ui.fightPanel then ui.fightPanel:Hide() end
+    if ui.historyFooter then ui.historyFooter:Hide() end
     local h
     if state.tab == "sources" then h = RenderSources(model)
     elseif state.tab == "fight" then h = RenderFight(model)
@@ -1654,6 +1698,13 @@ end
 function Window.ResetPosition()
     if frame then frame:ClearAllPoints(); frame:SetPoint("CENTER") end
     if toast then toast:ClearAllPoints(); toast:SetPoint("TOP", UIParent, "TOP", 0, -140) end
+end
+
+-- Saved deaths were deleted, cleared or trimmed (Squizzcap.lua): redraw an
+-- open window. The death on screen stays -- it is held as ui.model, not
+-- looked up in the list -- and All deaths re-clamps the run it shows.
+function Window.HistoryChanged()
+    if frame and frame:IsShown() then Render() end
 end
 
 -- The look, for other windows (Welcome.lua) to match this one rather than

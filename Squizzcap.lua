@@ -20,6 +20,8 @@ local defaults = {
     toast = {},
     onDeath = "toast",  -- "window" | "toast" | "none"; compact by default (user decision 2026-09-27)
     runs = {},          -- saved deaths, see "Runs" below
+    keepRuns = 20,      -- how many runs to keep; the oldest go first
+    freshEachKey = false, -- clear earlier runs when a Mythic+ key starts
 }
 
 local function Backfill(dst, src)
@@ -55,8 +57,14 @@ end
 -- are grouped by zone and day. Runs are created lazily, on the first death.
 -- ---------------------------------------------------------------------------
 
-local RUNS_MAX = 20
 local startNewRun = false
+
+-- Drops the oldest runs past the "Keep history" setting. Also run when the
+-- setting is lowered, so it takes effect at once.
+function addon.TrimRuns()
+    local runs, keep = addon.db.runs, addon.db.keepRuns or 20
+    while #runs > keep do table.remove(runs, 1) end
+end
 local wasInInstance
 
 local function RunIdentity()
@@ -86,7 +94,7 @@ local function CurrentRun()
     startNewRun = false
     local run = { key = key, name = name, difficulty = difficulty, keyLevel = KeystoneLevel(), started = time(), deaths = {} }
     table.insert(runs, run)
-    while #runs > RUNS_MAX do table.remove(runs, 1) end
+    addon.TrimRuns()
     return run, #runs
 end
 
@@ -105,6 +113,12 @@ end
 
 function addon.ClearSavedDeaths()
     wipe(addon.db.runs)
+    addon.Window.HistoryChanged()
+end
+
+function addon.DeleteRun(index)
+    if addon.db.runs[index] then table.remove(addon.db.runs, index) end
+    addon.Window.HistoryChanged()
 end
 
 -- ---------------------------------------------------------------------------
@@ -205,7 +219,7 @@ local function CreateOptionsPanel()
     local db = addon.db
 
     optionsFrame = CreateFrame("Frame", "SquizzcapOptionsFrame", UIParent, "BackdropTemplate")
-    optionsFrame:SetSize(380, 400)
+    optionsFrame:SetSize(380, 496)
     optionsFrame:SetPoint("CENTER", 0, 0)
     optionsFrame:SetFrameStrata("DIALOG")
     optionsFrame:SetFrameLevel(520)
@@ -510,8 +524,25 @@ local function CreateOptionsPanel()
     note:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
     note:SetWidth(340)
     note:SetJustifyH("LEFT")
-    note:SetText("Every death is kept for this character, grouped by dungeon or raid visit (the last " .. RUNS_MAX .. "). See the All deaths tab.")
+    note:SetText("Every death is kept for this character, grouped by dungeon or raid visit. See the All deaths tab.")
     y = y - 34
+
+    CreateDropdown(content, "Keep history", y, {
+        { value = 5,  text = "The last 5 runs" },
+        { value = 10, text = "The last 10 runs" },
+        { value = 20, text = "The last 20 runs" },
+        { value = 50, text = "The last 50 runs" },
+    }, function() return db.keepRuns end, function(val)
+        db.keepRuns = val
+        addon.TrimRuns()
+        addon.Window.HistoryChanged()
+    end)
+    y = y - 60
+
+    CreateCheckbox(content, "Start fresh each Mythic+ key", y,
+        function() return db.freshEachKey end,
+        function(val) db.freshEachKey = val end)
+    y = y - 32
 
     local clearBtn = CreateFrame("Button", nil, content, "BackdropTemplate")
     clearBtn:SetSize(150, 24)
@@ -608,6 +639,12 @@ events:SetScript("OnEvent", function(self, event, arg1, arg2)
         wasInInstance = inInstance
     elseif event == "CHALLENGE_MODE_START" then
         startNewRun = true
+        -- The new key's run is created on its first death, so clearing now
+        -- leaves All deaths holding only this key.
+        if addon.db.freshEachKey and #addon.db.runs > 0 then
+            addon.ClearSavedDeaths()
+            Say("New key: earlier saved deaths cleared (Start fresh each Mythic+ key is on).")
+        end
     elseif event == "PLAYER_DEAD" then
         -- The recap is assembled as you die; give it a moment to land. The
         -- moment of death is taken NOW, not then: it is what lines the logged

@@ -30,6 +30,8 @@ local RELEASE_NOTES = {
             .. "killed you more than once.",
         "Avoidable hits are counted per death and per run, and This fight shows how much of the fight's damage "
             .. "was avoidable.",
+        "Delete a run or clear everything from the All deaths tab, choose how many runs to keep, or have each "
+            .. "Mythic+ key start fresh (Options).",
     },
     ["1.1.0"] = {
         "Healing you received is now part of the recap: the health graph rises in green exactly when each "
