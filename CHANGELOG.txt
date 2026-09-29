@@ -25,6 +25,12 @@ New:
   optional Start fresh each Mythic+ key that clears earlier runs when a
   key starts, so All deaths only ever shows the key you are in.
 
+Fixed:
+
+- A death could be saved twice, showing as two identical entries in All
+  deaths (seen in an arena skirmish), because the game can report one death
+  twice. The second report is now recognised and ignored.
+
 
 V1.1.0 (2026-09-28)
 ------------------

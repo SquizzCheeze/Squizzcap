@@ -587,10 +587,31 @@ addon.ToggleOptions = ToggleOptions -- the welcome window's Options button
 -- Death handling
 -- ---------------------------------------------------------------------------
 
+-- Is `model` the death already saved as `last`? PLAYER_DEAD can fire twice
+-- for one death (seen in an arena skirmish, 2026-09-29: two identical entries),
+-- and each firing reads the same recap. Readable recaps are matched on the
+-- killing blow's own game timestamp and amount; a hidden (stub) one has
+-- neither, so on being saved within a few seconds of each other.
+local function SameDeath(last, model)
+    if not last then return false end
+    local a, b = last.hits and last.hits[1], model.hits and model.hits[1]
+    if last.stub or model.secret or not a or not b then
+        return math.abs((last.when or 0) - (model.when or 0)) <= 3
+    end
+    local ta, tb, aa, ab = a.timestamp, b.timestamp, a.amount, b.amount
+    local IsSecret = addon.Data.IsSecret
+    if IsSecret(ta) or IsSecret(tb) or IsSecret(aa) or IsSecret(ab) then
+        return math.abs((last.when or 0) - (model.when or 0)) <= 3
+    end
+    return ta == tb and aa == ab
+end
+
 local function OnDeath(deathTime)
     local model = addon.Data.Read(nil, deathTime)
     if not model then return end
     local run, runIndex = CurrentRun()
+    -- The same death reported twice: it is saved and on screen already.
+    if SameDeath(run.deaths[#run.deaths], model) then return end
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths
 
