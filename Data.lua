@@ -504,9 +504,27 @@ function Data.ReadFight()
         end
     end
     if #fight.spells == 0 then return nil end
+    -- Avoidable damage over the whole fight, summed BEFORE the list is cut
+    -- to its top spells so a long tail of small avoidables still counts.
+    fight.avoidable = 0
+    for _, sp in ipairs(fight.spells) do
+        if sp.avoidable then fight.avoidable = fight.avoidable + sp.amount end
+    end
     table.sort(fight.spells, function(a, b) return a.amount > b.amount end)
     for i = #fight.spells, FIGHT_MAX_SPELLS + 1, -1 do fight.spells[i] = nil end
     return fight
+end
+
+-- How many of the recap's hits Blizzard marked avoidable. Hits added from
+-- the log (ExtendHits) carry no such flag, so only the recap's count. Works
+-- on saved deaths too; nil for one whose values the game hid.
+function Data.AvoidableHits(model)
+    if not model or model.stub or model.secret or not model.hits then return nil end
+    local n = 0
+    for _, h in ipairs(model.hits) do
+        if h.avoidable and not h.extended then n = n + 1 end
+    end
+    return n
 end
 
 -- Returns the model for the most recent death (recapID nil), or nil + reason.

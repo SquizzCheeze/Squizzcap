@@ -28,6 +28,8 @@ local RELEASE_NOTES = {
             .. "who cast each spell, how much it did, and Blizzard's Avoidable and Deadly markers.",
         "All deaths sums up each run: how many deaths came from an avoidable killing blow, and anything that "
             .. "killed you more than once.",
+        "Avoidable hits are counted per death and per run, and This fight shows how much of the fight's damage "
+            .. "was avoidable.",
     },
     ["1.1.0"] = {
         "Healing you received is now part of the recap: the health graph rises in green exactly when each "

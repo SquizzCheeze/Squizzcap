@@ -1125,7 +1125,12 @@ local function RenderFight(model)
     p:ClearAllPoints()
     p:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, 0)
     local dur = FightDuration(fight.duration)
-    p.summary:SetText(Fmt(fight.total) .. " taken" .. (dur and ("  ·  " .. dur) or ""))
+    local avoid = ""
+    if (fight.avoidable or 0) > 0 and fight.total > 0 then
+        avoid = string.format("  ·  |cffffb066%s avoidable (%d%%)|r", Fmt(fight.avoidable),
+            math.floor(fight.avoidable / fight.total * 100 + 0.5))
+    end
+    p.summary:SetText(Fmt(fight.total) .. " taken" .. avoid .. (dur and ("  ·  " .. dur) or ""))
     local top = fight.spells[1] and fight.spells[1].amount or 1
     local trackW = INNER - 24 - 258 - 126
     for j, sp in ipairs(fight.spells) do
@@ -1192,7 +1197,7 @@ end
 -- count (a stub or secret recap has no names to compare). nil when neither
 -- applies, so a clean single death adds no line.
 local function RunSummary(run)
-    local avoidable, byName, readable = 0, {}, 0
+    local avoidable, byName, readable, avoidHits = 0, {}, 0, 0
     for _, m in ipairs(run.deaths) do
         local kb = m.hits and m.hits[1]
         if kb and not m.stub and not m.secret then
@@ -1200,6 +1205,7 @@ local function RunSummary(run)
             if kb.avoidable then avoidable = avoidable + 1 end
             local name = kb.name or UNKNOWN
             byName[name] = (byName[name] or 0) + 1
+            avoidHits = avoidHits + (Data.AvoidableHits(m) or 0)
         end
     end
     local topName, topCount = nil, 1
@@ -1208,10 +1214,14 @@ local function RunSummary(run)
     end
     local parts = {}
     if avoidable > 0 then
-        parts[#parts + 1] = string.format("%d of %d from an avoidable killing blow", avoidable, readable)
+        parts[#parts + 1] = string.format("%d of %d deaths avoidable", avoidable, readable)
     end
     if topName then
         parts[#parts + 1] = string.format("%s killed you %d times", topName, topCount)
+    end
+    -- Across these deaths' recaps (last 10 hits each), not the whole run.
+    if avoidHits > avoidable then
+        parts[#parts + 1] = string.format("%d avoidable hits in all", avoidHits)
     end
     if #parts == 0 then return nil end
     return table.concat(parts, "  ·  ")
@@ -1303,7 +1313,10 @@ local function RenderHistory()
         else
             r.icon:SetTexture(kb.icon)
             r.what:SetText(kb.name or UNKNOWN)
-            r.sub:SetText((m.secret and "" or ((kb.source or "") .. "  ·  ")) .. Ago(m.when))
+            local avoidN = Data.AvoidableHits(m)
+            local avoidTxt = (avoidN and avoidN > 0)
+                and string.format("  ·  |cffffb066%d avoidable %s|r", avoidN, avoidN == 1 and "hit" or "hits") or ""
+            r.sub:SetText((m.secret and "" or ((kb.source or "") .. "  ·  ")) .. Ago(m.when) .. avoidTxt)
             r.avoid:SetShown(not m.secret and kb.avoidable)
             r.fast:SetText((not m.secret and m.speed) and string.format("%.1fs", m.speed.seconds) or "")
         end

@@ -16,6 +16,9 @@ New:
 - The All deaths tab now sums up each run under its title: how many of
   its deaths came from an avoidable killing blow, and anything that killed
   you more than once ("Fel Missiles killed you 3 times").
+- Avoidable hits are counted: each death in All deaths shows how many of
+  its last hits were avoidable, the run summary adds them up, and This
+  fight shows how much of the fight's damage was avoidable.
 
 
 V1.1.0 (2026-09-28)
