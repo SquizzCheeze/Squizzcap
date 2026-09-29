@@ -2,6 +2,19 @@ Squizzcap - Changelog
 =====================
 
 
+V1.2.0
+------
+
+New:
+
+- A "This fight" tab: everything that hit you over the whole pull, not just
+  the last few seconds, from Blizzard's own damage meter. Each spell shows
+  who cast it, how much it did to you and its share of the total, with
+  Blizzard's Avoidable and Deadly markers; hover one for the spell's
+  tooltip. It is read the moment you die, so deaths from before this update
+  don't have it.
+
+
 V1.1.0 (2026-09-28)
 ------------------
 

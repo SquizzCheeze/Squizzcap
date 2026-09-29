@@ -452,6 +452,63 @@ local function AttachHeals(model, deathTime)
     model.healCount = count
 end
 
+-- ---------------------------------------------------------------------------
+-- This fight (Blizzard's damage meter)
+--
+-- The recap names only the last 10 hits. The built-in damage meter keeps
+-- every spell that hit you this fight, named, with Blizzard's avoidable and
+-- deadly flags -- and it is readable at death: its values are secret while
+-- YOU are in combat (SecretWhenInCombat), and a dead player is not (probed
+-- 2026-09-28: totals and 6/6 spells readable). It has no per-hit timing,
+-- so it sits beside the recap as a whole-fight view, not on the timeline.
+-- Every value is probed anyway; one secret one drops the whole view.
+-- ---------------------------------------------------------------------------
+
+local FIGHT_MAX_SPELLS = 20
+
+function Data.ReadFight()
+    local DM = C_DamageMeter
+    if not (DM and DM.GetCombatSessionFromType and Enum.DamageMeterType and Enum.DamageMeterSessionType) then return nil end
+    local okAvail, avail = pcall(DM.IsDamageMeterAvailable)
+    if not okAvail or not avail or IsSecret(avail) then return nil end
+    local current, taken = Enum.DamageMeterSessionType.Current, Enum.DamageMeterType.DamageTaken
+
+    -- Your own entry in this fight's damage-taken list, for its GUID.
+    local okSess, session = pcall(DM.GetCombatSessionFromType, current, taken)
+    if not okSess or type(session) ~= "table" or type(session.combatSources) ~= "table" then return nil end
+    local me
+    for _, src in ipairs(session.combatSources) do
+        if src.isLocalPlayer then me = src break end
+    end
+    if not me or IsSecret(me.sourceGUID) then return nil end
+
+    local okSrc, source = pcall(DM.GetCombatSessionSourceFromType, current, taken, me.sourceGUID)
+    if not okSrc or type(source) ~= "table" or type(source.combatSpells) ~= "table" then return nil end
+    if IsSecret(source.totalAmount) or IsSecret(session.durationSeconds) then return nil end
+
+    local fight = { total = source.totalAmount or 0, duration = session.durationSeconds, spells = {} }
+    for _, sp in ipairs(source.combatSpells) do
+        if IsSecret(sp.spellID) or IsSecret(sp.totalAmount) then return nil end
+        if (sp.totalAmount or 0) > 0 then
+            local creature = sp.creatureName
+            if IsSecret(creature) or creature == "" then creature = nil end
+            fight.spells[#fight.spells + 1] = {
+                spellId = sp.spellID,
+                name = SpellName(sp.spellID) or UNKNOWN,
+                icon = SpellTexture(sp.spellID) or "Interface\\Icons\\INV_Misc_QuestionMark",
+                amount = sp.totalAmount,
+                creature = creature,
+                avoidable = (not IsSecret(sp.isAvoidable)) and sp.isAvoidable and true or false,
+                deadly = (not IsSecret(sp.isDeadly)) and sp.isDeadly and true or false,
+            }
+        end
+    end
+    if #fight.spells == 0 then return nil end
+    table.sort(fight.spells, function(a, b) return a.amount > b.amount end)
+    for i = #fight.spells, FIGHT_MAX_SPELLS + 1, -1 do fight.spells[i] = nil end
+    return fight
+end
+
 -- Returns the model for the most recent death (recapID nil), or nil + reason.
 -- `deathTime` (GetTime() when you died) lets the incoming heals be placed;
 -- without it -- reopening a recap later -- they are simply not attached.
@@ -504,6 +561,9 @@ function Data.Read(recapID, deathTime)
         Summarise(model)
         if deathTime and model.hits[1].hpBefore then AttachHeals(model, deathTime) end
     end
+    -- The fight's own story, even when the recap itself is secret: the meter
+    -- is about the player's combat state, and a dead player is out of it.
+    if deathTime then model.fight = Data.ReadFight() end
 
     return model
 end

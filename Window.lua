@@ -722,7 +722,10 @@ end
 
 -- ----- tabs + drill-down area ---------------------------------------------
 
-local TABS = { { id = "hits", label = "Hits" }, { id = "sources", label = "Sources" }, { id = "history", label = "All deaths" } }
+local TABS = {
+    { id = "hits", label = "Hits" }, { id = "sources", label = "Sources" },
+    { id = "fight", label = "This fight" }, { id = "history", label = "All deaths" },
+}
 
 local function BuildTabs()
     local bar = CreateFrame("Frame", nil, frame)
@@ -768,6 +771,7 @@ local function RenderTabs(model)
         local count
         if b.id == "hits" then count = #model.hits
         elseif b.id == "sources" then count = model.sources and #model.sources
+        elseif b.id == "fight" then count = model.fight and #model.fight.spells
         else count = nil end
         b.label:SetText(count and string.format("%s (%d)", b.base, count) or b.base)
         b:SetWidth(b.label:GetStringWidth() + 28)
@@ -775,8 +779,9 @@ local function RenderTabs(model)
         b.label:SetTextColor(unpack(on and C.text or C.muted))
         if on then b.under:SetColorTexture(accent[1], accent[2], accent[3], 1) end
         b.under:SetShown(on)
-        -- Sources needs the aggregation a secret recap cannot have.
-        local usable = not (b.id == "sources" and model.secret)
+        -- Sources needs the aggregation a secret recap cannot have; This
+        -- fight needs the damage meter, read at death (older deaths lack it).
+        local usable = not (b.id == "sources" and model.secret) and not (b.id == "fight" and not model.fight)
         b:SetShown(usable)
     end
 end
@@ -1033,6 +1038,117 @@ local function RenderSources(model)
     return y
 end
 
+-- This fight tab: everything that hit you over the whole pull, from
+-- Blizzard's damage meter (Data.ReadFight). No timing, so no graph: one
+-- panel, one line per spell, biggest first.
+local FIGHT_LINE_H = 24
+
+local function FightPanel()
+    if ui.fightPanel then return ui.fightPanel end
+    local p = Panel(ui.list)
+    p:SetWidth(INNER)
+    p.name = Text(p, FONT.bodyBold, 15, C.text)
+    p.name:SetPoint("TOPLEFT", 12, -9)
+    p.name:SetText("Everything that hit you this fight")
+    p.summary = Text(p, FONT.body, 12, C.muted, "RIGHT")
+    p.summary:SetPoint("TOPRIGHT", -12, -11)
+    p.lines = {}
+    ui.fightPanel = p
+    return p
+end
+
+local function FightLine(p, j)
+    local l = p.lines[j]
+    if l then return l end
+    local w = INNER - 24
+    l = CreateFrame("Frame", nil, p)
+    l:SetSize(w, FIGHT_LINE_H - 4)
+    l:EnableMouse(true)
+    l.icon = l:CreateTexture(nil, "ARTWORK")
+    l.icon:SetSize(18, 18)
+    l.icon:SetPoint("LEFT", 0, 0)
+    l.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    l.name = Text(l, FONT.body, 13, C.text)
+    l.name:SetPoint("LEFT", 24, 0)
+    l.name:SetWidth(190)
+    -- Avoidable / deadly as the same atlases the badges use, icon-only.
+    l.avoid = l:CreateTexture(nil, "ARTWORK")
+    l.avoid:SetAtlas(BADGE.avoidable.atlas)
+    l.avoid:SetSize(14, 14)
+    l.avoid:SetPoint("LEFT", 220, 0)
+    l.deadly = l:CreateTexture(nil, "ARTWORK")
+    l.deadly:SetAtlas(BADGE.deadly.atlas)
+    l.deadly:SetSize(14, 14)
+    l.deadly:SetPoint("LEFT", 238, 0)
+    l.track = Fill(l, "ARTWORK", C.track)
+    l.track:SetPoint("LEFT", 258, 0)
+    l.track:SetSize(w - 258 - 126, 8)
+    l.bar = l:CreateTexture(nil, "ARTWORK", nil, 1)
+    l.bar:SetPoint("LEFT", l.track, "LEFT")
+    l.bar:SetHeight(8)
+    l.bar:SetColorTexture(C.dmg[1], C.dmg[2], C.dmg[3], 1)
+    l.amount = Text(l, FONT.body, 13, C.text, "RIGHT")
+    l.amount:SetPoint("RIGHT", 0, 0)
+    l:SetScript("OnEnter", function(self)
+        local sp = self.spell
+        if not sp then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if not pcall(GameTooltip.SetSpellByID, GameTooltip, sp.spellId) then
+            GameTooltip:SetText(sp.name, 1, 1, 1)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(Fmt(sp.amount) .. " damage to you this fight", C.dmg[1], C.dmg[2], C.dmg[3])
+        if sp.creature then GameTooltip:AddLine(sp.creature, C.muted[1], C.muted[2], C.muted[3]) end
+        if sp.avoidable and DEATH_RECAP_AVOIDABLE_SPELL then
+            GameTooltip:AddLine(CreateAtlasMarkup(BADGE.avoidable.atlas, 16, 16) .. " " .. DEATH_RECAP_AVOIDABLE_SPELL, 1, 1, 1, true)
+        end
+        if sp.deadly and DEATH_RECAP_DEADLY_SPELL then
+            GameTooltip:AddLine(CreateAtlasMarkup(BADGE.deadly.atlas, 16, 16) .. " " .. DEATH_RECAP_DEADLY_SPELL, 1, 1, 1, true)
+        end
+        GameTooltip:Show()
+    end)
+    l:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    p.lines[j] = l
+    return l
+end
+
+local function FightDuration(s)
+    if type(s) ~= "number" or s <= 0 then return nil end
+    s = math.floor(s + 0.5)
+    return string.format("%d:%02d", math.floor(s / 60), s % 60)
+end
+
+local function RenderFight(model)
+    local fight = model.fight
+    if not fight then return 0 end
+    local p = FightPanel()
+    p:ClearAllPoints()
+    p:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, 0)
+    local dur = FightDuration(fight.duration)
+    p.summary:SetText(Fmt(fight.total) .. " taken" .. (dur and ("  ·  " .. dur) or ""))
+    local top = fight.spells[1] and fight.spells[1].amount or 1
+    local trackW = INNER - 24 - 258 - 126
+    for j, sp in ipairs(fight.spells) do
+        local l = FightLine(p, j)
+        l.spell = sp
+        l:ClearAllPoints()
+        l:SetPoint("TOPLEFT", 12, -34 - (j - 1) * FIGHT_LINE_H)
+        l.icon:SetTexture(sp.icon)
+        l.name:SetText(sp.creature and string.format("%s |cffa3a1a8%s|r", sp.name, sp.creature) or sp.name)
+        l.avoid:SetShown(sp.avoidable)
+        l.deadly:SetShown(sp.deadly)
+        l.bar:SetWidth(math.max(1, trackW * sp.amount / top))
+        local pct = fight.total > 0 and math.floor(sp.amount / fight.total * 100 + 0.5) or 0
+        l.amount:SetText(string.format("%s |cffa3a1a8%d%%|r", Fmt(sp.amount), pct))
+        l:Show()
+    end
+    for j = #fight.spells + 1, #p.lines do p.lines[j]:Hide() end
+    local h = 42 + #fight.spells * FIGHT_LINE_H
+    p:SetHeight(h)
+    p:Show()
+    return h
+end
+
 -- Deaths tab: every saved death, grouped into runs (Squizzcap.lua decides
 -- where a run starts). A header pages between runs; rows are that run's
 -- deaths, newest first.
@@ -1261,6 +1377,7 @@ Render = function()
     end
 
     if model.secret and state.tab == "sources" then state.tab = "hits" end
+    if not model.fight and state.tab == "fight" then state.tab = "hits" end
     RenderTabs(model)
 
     local bottom = Stack({
@@ -1276,8 +1393,10 @@ Render = function()
     for _, r in ipairs(ui.deathRows) do r:Hide() end
     for _, r in ipairs(ui.healRows or {}) do r:Hide() end
     if ui.runHeader then ui.runHeader:Hide() end
+    if ui.fightPanel then ui.fightPanel:Hide() end
     local h
     if state.tab == "sources" then h = RenderSources(model)
+    elseif state.tab == "fight" then h = RenderFight(model)
     elseif state.tab == "history" then h = RenderHistory()
     else h = RenderHits(model) end
     ui.list:SetHeight(math.max(1, h))

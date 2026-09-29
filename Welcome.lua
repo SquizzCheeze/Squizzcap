@@ -23,6 +23,10 @@ addon.Welcome = Welcome
 -- ADD A NEW ENTRY AS PART OF RELEASING. A version with no entry still shows
 -- the update window, just without bullets.
 local RELEASE_NOTES = {
+    ["1.2.0"] = {
+        "A \"This fight\" tab: everything that hit you over the whole pull, from Blizzard's damage meter, with "
+            .. "who cast each spell, how much it did, and Blizzard's Avoidable and Deadly markers.",
+    },
     ["1.1.0"] = {
         "Healing you received is now part of the recap: the health graph rises in green exactly when each "
             .. "heal landed, with a Healing Received total and a \"+48,300 healed\" line between hits.",
