@@ -606,12 +606,44 @@ local function SameDeath(last, model)
     return ta == tb and aa == ab
 end
 
+-- The damage meter can still be hidden at the moment of death -- you can be
+-- flagged in combat for a moment after dying, and in an arena it was (This
+-- fight missing, while a second, later PLAYER_DEAD read had it). So a failed
+-- read is retried over the next few seconds and the tab added to the death
+-- already saved. `saved` is the table in the run (a live model; a stub for a
+-- hidden recap has no tabs to add to).
+local FIGHT_RETRIES = { 1, 3, 6 }
+local function RetryFight(saved)
+    if not saved or saved.stub or saved.fight then return end
+    for _, delay in ipairs(FIGHT_RETRIES) do
+        C_Timer.After(delay, function()
+            if saved.fight then return end
+            local fight, why = addon.Data.ReadFight()
+            if fight then
+                saved.fight, saved.fightWhy = fight, nil
+                addon.Window.HistoryChanged() -- redraws an open window, tab included
+            else
+                saved.fightWhy = (why or "?") .. (InCombatLockdown() and " [in combat]" or "")
+            end
+        end)
+    end
+end
+
 local function OnDeath(deathTime)
     local model = addon.Data.Read(nil, deathTime)
     if not model then return end
     local run, runIndex = CurrentRun()
-    -- The same death reported twice: it is saved and on screen already.
-    if SameDeath(run.deaths[#run.deaths], model) then return end
+    -- The same death reported twice: it is saved and on screen already. The
+    -- second read can have what the first could not (This fight, above).
+    local last = run.deaths[#run.deaths]
+    if SameDeath(last, model) then
+        if not last.stub and not last.fight and model.fight then
+            last.fight, last.fightWhy = model.fight, nil
+            addon.Window.HistoryChanged()
+        end
+        return
+    end
+    if not model.fight then RetryFight(model) end
     table.insert(run.deaths, Saveable(model))
     local deathIndex = #run.deaths
 
@@ -694,6 +726,15 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
     elseif arg == "toast" then
         local model, r, d = LastDeath()
         if model then addon.Window.ShowToast(model, r, d) else Say("No deaths saved yet.") end
+    elseif arg == "fight" then
+        -- Why the last death has no This fight tab (Data.ReadFight's reason).
+        local model = LastDeath()
+        if not model then Say("No deaths saved yet.") return end
+        if model.fight then
+            Say(string.format("This fight: %d spells recorded for your last death.", #model.fight.spells))
+        else
+            Say("No This fight tab for your last death: " .. tostring(model.fightWhy or "not recorded (a death from before this was added)"))
+        end
     elseif arg == "probe" then
         -- TEMPORARY (2026-09-29): can we read OTHER group members' death
         -- recaps? Blizzard's meter opens any Deaths entry with its

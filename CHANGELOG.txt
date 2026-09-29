@@ -30,6 +30,10 @@ Fixed:
 - A death could be saved twice, showing as two identical entries in All
   deaths (seen in an arena skirmish), because the game can report one death
   twice. The second report is now recognised and ignored.
+- The This fight tab could be missing when the game was still hiding the
+  damage meter at the moment you died (seen in an arena). It now tries
+  again over the next few seconds and adds the tab once it can.
+  /squizzcap fight says why a death has no This fight tab.
 
 
 V1.1.0 (2026-09-28)

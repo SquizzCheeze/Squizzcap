@@ -468,27 +468,30 @@ local FIGHT_MAX_SPELLS = 20
 
 function Data.ReadFight()
     local DM = C_DamageMeter
-    if not (DM and DM.GetCombatSessionFromType and Enum.DamageMeterType and Enum.DamageMeterSessionType) then return nil end
-    local okAvail, avail = pcall(DM.IsDamageMeterAvailable)
-    if not okAvail or not avail or IsSecret(avail) then return nil end
+    if not (DM and DM.GetCombatSessionFromType and Enum.DamageMeterType and Enum.DamageMeterSessionType) then return nil, "no damage meter API" end
+    local okAvail, avail, failure = pcall(DM.IsDamageMeterAvailable)
+    if not okAvail or not avail or IsSecret(avail) then
+        local why = (okAvail and type(failure) == "string" and not IsSecret(failure) and failure ~= "") and failure or nil
+        return nil, "damage meter not available here" .. (why and (" (" .. why .. ")") or "")
+    end
     local current, taken = Enum.DamageMeterSessionType.Current, Enum.DamageMeterType.DamageTaken
 
     -- Your own entry in this fight's damage-taken list, for its GUID.
     local okSess, session = pcall(DM.GetCombatSessionFromType, current, taken)
-    if not okSess or type(session) ~= "table" or type(session.combatSources) ~= "table" then return nil end
+    if not okSess or type(session) ~= "table" or type(session.combatSources) ~= "table" then return nil, "no damage-taken session" end
     local me
     for _, src in ipairs(session.combatSources) do
         if src.isLocalPlayer then me = src break end
     end
-    if not me or IsSecret(me.sourceGUID) then return nil end
+    if not me or IsSecret(me.sourceGUID) then return nil, "your entry missing or hidden" end
 
     local okSrc, source = pcall(DM.GetCombatSessionSourceFromType, current, taken, me.sourceGUID)
-    if not okSrc or type(source) ~= "table" or type(source.combatSpells) ~= "table" then return nil end
-    if IsSecret(source.totalAmount) or IsSecret(session.durationSeconds) then return nil end
+    if not okSrc or type(source) ~= "table" or type(source.combatSpells) ~= "table" then return nil, "no spell breakdown" end
+    if IsSecret(source.totalAmount) or IsSecret(session.durationSeconds) then return nil, "totals hidden (secret)" end
 
     local fight = { total = source.totalAmount or 0, duration = session.durationSeconds, spells = {} }
     for _, sp in ipairs(source.combatSpells) do
-        if IsSecret(sp.spellID) or IsSecret(sp.totalAmount) then return nil end
+        if IsSecret(sp.spellID) or IsSecret(sp.totalAmount) then return nil, "a spell's values hidden (secret)" end
         if (sp.totalAmount or 0) > 0 then
             local creature = sp.creatureName
             if IsSecret(creature) or creature == "" then creature = nil end
@@ -503,7 +506,7 @@ function Data.ReadFight()
             }
         end
     end
-    if #fight.spells == 0 then return nil end
+    if #fight.spells == 0 then return nil, "no damage taken recorded" end
     -- Avoidable damage over the whole fight, summed BEFORE the list is cut
     -- to its top spells so a long tail of small avoidables still counts.
     fight.avoidable = 0
@@ -581,7 +584,14 @@ function Data.Read(recapID, deathTime)
     end
     -- The fight's own story, even when the recap itself is secret: the meter
     -- is about the player's combat state, and a dead player is out of it.
-    if deathTime then model.fight = Data.ReadFight() end
+    -- Why there is no This fight tab, for /squizzcap fight (and whether the
+    -- read happened in combat, the usual suspect for hidden values).
+    if deathTime then
+        model.fight, model.fightWhy = Data.ReadFight()
+        if not model.fight then
+            model.fightWhy = (model.fightWhy or "?") .. (InCombatLockdown() and " [in combat]" or "")
+        end
+    end
 
     return model
 end
