@@ -1179,8 +1179,42 @@ local function RunHeader()
     h.sub = Text(h, FONT.body, 12, C.muted, "CENTER")
     h.sub:SetPoint("TOPLEFT", h.title, "BOTTOMLEFT", 0, -2)
     h.sub:SetPoint("TOPRIGHT", h.title, "BOTTOMRIGHT", 0, -2)
+    -- The run at a glance (RunSummary); hidden when there is nothing to say.
+    h.summary = Text(h, FONT.bodyBold, 12, C.avoid, "CENTER")
+    h.summary:SetPoint("TOPLEFT", h.sub, "BOTTOMLEFT", 0, -4)
+    h.summary:SetPoint("TOPRIGHT", h.sub, "BOTTOMRIGHT", 0, -4)
     ui.runHeader = h
     return h
+end
+
+-- What a run's deaths have in common: how many were an avoidable killing
+-- blow, and a killer that got you more than once. Only readable deaths
+-- count (a stub or secret recap has no names to compare). nil when neither
+-- applies, so a clean single death adds no line.
+local function RunSummary(run)
+    local avoidable, byName, readable = 0, {}, 0
+    for _, m in ipairs(run.deaths) do
+        local kb = m.hits and m.hits[1]
+        if kb and not m.stub and not m.secret then
+            readable = readable + 1
+            if kb.avoidable then avoidable = avoidable + 1 end
+            local name = kb.name or UNKNOWN
+            byName[name] = (byName[name] or 0) + 1
+        end
+    end
+    local topName, topCount = nil, 1
+    for name, n in pairs(byName) do
+        if n > topCount or (n == topCount and topName and name < topName) then topName, topCount = name, n end
+    end
+    local parts = {}
+    if avoidable > 0 then
+        parts[#parts + 1] = string.format("%d of %d from an avoidable killing blow", avoidable, readable)
+    end
+    if topName then
+        parts[#parts + 1] = string.format("%s killed you %d times", topName, topCount)
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, "  ·  ")
 end
 
 local function DeathRow(i)
@@ -1227,6 +1261,8 @@ local function RenderHistory()
     if #runs == 0 then
         header.title:SetText("No deaths saved yet")
         header.sub:SetText("")
+        header.summary:Hide()
+        header:SetHeight(40)
         header.prev:SetEnabledLook(false)
         header.next:SetEnabledLook(false)
         for _, r in ipairs(ui.deathRows) do r:Hide() end
@@ -1240,8 +1276,12 @@ local function RenderHistory()
     header.sub:SetText(string.format("Run %d of %d  ·  %d %s  ·  %s", runIndex, #runs, #run.deaths, #run.deaths == 1 and "death" or "deaths", Ago(run.started)))
     header.prev:SetEnabledLook(runIndex > 1)
     header.next:SetEnabledLook(runIndex < #runs)
+    local summary = RunSummary(run)
+    header.summary:SetText(summary or "")
+    header.summary:SetShown(summary ~= nil)
+    header:SetHeight(summary and 58 or 40)
 
-    local y = 46
+    local y = summary and 64 or 46
     local list = run.deaths
     local shown = 0
     for i = #list, 1, -1 do

@@ -13,6 +13,9 @@ New:
   Blizzard's Avoidable and Deadly markers; hover one for the spell's
   tooltip. It is read the moment you die, so deaths from before this update
   don't have it.
+- The All deaths tab now sums up each run under its title: how many of
+  its deaths came from an avoidable killing blow, and anything that killed
+  you more than once ("Fel Missiles killed you 3 times").
 
 
 V1.1.0 (2026-09-28)
