@@ -25,18 +25,27 @@ every death from a whole key or raid night.
   Blizzard's own *Avoidable* and *Deadly* markers
 - **How fast** you went down (burst or worn down), total damage taken, and
   how much was absorbed, resisted or blocked
-- **Your health** as a graph across the hits before your death, one dot per
-  hit sized by damage. Hover a dot for the spell's tooltip, click it to jump
-  to that hit
+- **Your health** as a graph over the last 5 seconds, one dot per hit sized
+  by damage, rising in green exactly when each heal landed. Hover a dot for
+  the spell's tooltip, click it to jump to that hit
+- **Healing received** beside damage taken, and what landed between each pair
+  of hits
 - **What hit you** - the damage split by spell in its school colour
 
 **Digging in**
 - **Hits** - every hit, newest first; click one for health before and after,
   absorbed, resisted, blocked and overkill
 - **Sources** - each enemy and the spells they hit you with
+- **This fight** - everything that hit you over the whole pull, not just the
+  last few seconds: each spell, who cast it, how much it did and its share,
+  with Blizzard's Avoidable and Deadly markers and how much of the fight's
+  damage was avoidable
 - **All deaths** - every death saved for your character, grouped by dungeon
-  or raid visit (Mythic+ runs show their key level), so you can review a
-  whole run afterwards
+  or raid visit (Mythic+ runs show their key level). Each run is summed up:
+  deaths from an avoidable killing blow, avoidable hits taken, and anything
+  that killed you more than once
+- Keep the last 5, 10, 20 or 50 runs, delete a run or clear everything, or
+  start fresh with each Mythic+ key
 
 **Sharing**
 - Link Blizzard's death recap into chat, or post a one-line summary to your
@@ -49,9 +58,19 @@ numbers are the game's, not reconstructed from the combat log (which addons
 can no longer read). That recap holds the **last 10 hits** before a death.
 
 The health graph is exact at every hit - the game records your health as each
-one lands, healing included. Healing itself is not in the recap, so the stretch
-*between* two hits is drawn faint: the rise is real, its timing is an
-estimate.
+one lands. Healing you received comes from the game's own heal feed and is
+placed exactly when each heal landed (overhealing included, and the figure
+says so).
+
+In a burst, 10 hits can be well under a second, so Squizzcap reaches back 5
+seconds with the older hits from the game's hit feed. The game names no spell
+or source for those and can miss or add one in a burst, so they are marked
+with ~ as approximate. The recap's own 10 hits, killing blow included, are
+never changed.
+
+**This fight** is read from Blizzard's damage meter the moment you die. If the
+game is still hiding it then, Squizzcap tries again over the next few seconds;
+`/squizzcap fight` tells you why a death has no This fight tab.
 
 If the game ever hides a recap's numbers from addons, Squizzcap still shows
 the killing blow and every hit, and switches off the parts that need
@@ -76,6 +95,8 @@ needed.
 | `/squizzcap` or `/scr` | Open the options |
 | `/squizzcap show` | Open your last death (the All deaths tab has the rest) |
 | `/squizzcap toast` | Show your last death as the compact summary |
+| `/squizzcap fight` | Why your last death has (or lacks) a This fight tab |
+| `/squizzcap notes` | What's new in this version |
 
 ## Bugs and requests
 
