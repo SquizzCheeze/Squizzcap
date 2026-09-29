@@ -1278,10 +1278,16 @@ local function ConfirmButton(parent, w, label, armedLabel, onConfirm)
     return b
 end
 
+-- Pinned to the WINDOW's bottom edge, not the end of the list, so the
+-- buttons stay in view however long the list is; Render stops the scroll
+-- area above them (HISTORY_FOOTER_H) while All deaths is showing.
+local HISTORY_FOOTER_H = 30
+
 local function HistoryFooter()
     if ui.historyFooter then return ui.historyFooter end
-    local f = CreateFrame("Frame", nil, ui.list)
-    f:SetSize(INNER, 30)
+    local f = CreateFrame("Frame", nil, frame)
+    f:SetSize(INNER, HISTORY_FOOTER_H)
+    f:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", PAD, PAD)
     f.delete = ConfirmButton(f, 150, "Delete this run", "Click again to delete",
         function() addon.DeleteRun(state.viewRun) end)
     f.delete:SetPoint("LEFT", 0, 0)
@@ -1365,12 +1371,8 @@ local function RenderHistory()
         y = y + 48 + 6
     end
     for i = shown + 1, #ui.deathRows do ui.deathRows[i]:Hide() end
-
-    local footer = HistoryFooter()
-    footer:ClearAllPoints()
-    footer:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, -(y + 4))
-    footer:Show()
-    return y + 4 + 30
+    HistoryFooter():Show()
+    return y
 end
 
 -- ----- layout + render -----------------------------------------------------
@@ -1479,10 +1481,6 @@ Render = function()
     local bottom = Stack({
         { ui.card, 8 }, { ui.secretNote, 10 }, { ui.stats, 8 }, { ui.strip, 8 }, { ui.share, 10 }, { ui.tabBar, 8 },
     })
-    ui.scroll:ClearAllPoints()
-    ui.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, bottom)
-    ui.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -PAD, PAD)
-
     -- Only one tab's widgets are visible at a time.
     for _, r in ipairs(ui.rows) do r:Hide() end
     for _, p in ipairs(ui.srcPanels) do p:Hide() end
@@ -1497,6 +1495,14 @@ Render = function()
     elseif state.tab == "history" then h = RenderHistory()
     else h = RenderHits(model) end
     ui.list:SetHeight(math.max(1, h))
+
+    -- Placed after the tab drew: All deaths' pinned buttons, when showing,
+    -- take the bottom strip and the list scrolls above them.
+    local footer = ui.historyFooter and ui.historyFooter:IsShown()
+    ui.scroll:ClearAllPoints()
+    ui.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, bottom)
+    ui.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -PAD, footer and (PAD + HISTORY_FOOTER_H + 8) or PAD)
+    ui.scroll:SetVerticalScroll(math.min(ui.scroll:GetVerticalScroll(), ui.scroll:GetVerticalScrollRange()))
 
     -- Title bar: link and report need a readable recap.
     ui.link:SetEnabledLook(model.link ~= nil)
