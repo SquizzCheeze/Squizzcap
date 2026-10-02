@@ -64,9 +64,9 @@ grouped into runs, for looking back over a key or a raid night. No libraries.
 
 ## Group deaths (V1.3.0, `Squizzcap.lua` "Group deaths")
 
-**CONFIRMED WORKING IN GAME 2026-10-02** (user, during a raid). Not yet seen inside a Mythic+ key, where
-DPSReport's notes say the Deaths list's names/GUIDs can be hidden -- if so, deaths there cannot be matched
-to a player and are skipped until readable.
+**CONFIRMED WORKING IN GAME 2026-10-02** (user), in a raid AND inside a Mythic+ key. DPSReport's notes
+say the Deaths list's names/GUIDs are hidden mid-key, but read out of combat (when this capture runs) they
+were readable enough to match deaths to players.
 
 - **Other members' recaps ARE readable.** The damage meter's Deaths session lists every death with a plain
   `deathRecapID`, and `C_DeathRecap` reads another player's recap by it as fully as yours (probed in a
