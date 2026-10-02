@@ -2,6 +2,31 @@ Squizzcap - Changelog
 =====================
 
 
+V1.3.0
+------
+
+New:
+
+- Group deaths. When someone in your group dies, Squizzcap now saves their
+  death recap as well as yours: open it from All deaths and you get the
+  same window -- killed by, the health graph, every hit, the sources -- in
+  their class colour, with This fight showing everything that hit THEM.
+  Their deaths are picked up between pulls (and while you lie dead), so
+  they appear in the list a moment after the fight ends, not mid-fight.
+  Healing received is yours only: the game reports heals landing on you
+  and no one else.
+- All deaths shows whose each death was, and a button at the bottom
+  switches between everyone's deaths and just yours. The run summary is
+  still about your own deaths.
+- DPS Report: clicking a player on its Deaths list opens their death here.
+- Turn group deaths off under Options, "Save group members' deaths too".
+
+Removed:
+
+- /squizzcap probe, the test command for whether group deaths could be
+  read at all. They can.
+
+
 V1.2.0 (2026-09-29)
 -------------------
 

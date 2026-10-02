@@ -22,6 +22,8 @@ local defaults = {
     runs = {},          -- saved deaths, see "Runs" below
     keepRuns = 20,      -- how many runs to keep; the oldest go first
     freshEachKey = false, -- clear earlier runs when a Mythic+ key starts
+    groupDeaths = true, -- save group members' deaths too (see "Group deaths")
+    historyShow = "all", -- All deaths lists "all" deaths or only "mine"
 }
 
 local function Backfill(dst, src)
@@ -159,7 +161,8 @@ function addon.ReportDeath(model)
     if not model or model.secret then return end
     local kb = model.hits[1]
     local amount = BreakUpLargeNumbers and BreakUpLargeNumbers(kb.amount) or tostring(kb.amount)
-    local msg = string.format("Squizzcap: died to %s%s for %s", kb.name, kb.source and (" (" .. kb.source .. ")") or "", amount)
+    local who = model.who and model.who.name and (model.who.name .. " ") or ""
+    local msg = string.format("Squizzcap: %sdied to %s%s for %s", who, kb.name, kb.source and (" (" .. kb.source .. ")") or "", amount)
     if kb.overkill > 0 then
         msg = msg .. string.format(" (%s overkill)", BreakUpLargeNumbers and BreakUpLargeNumbers(kb.overkill) or kb.overkill)
     end
@@ -219,7 +222,7 @@ local function CreateOptionsPanel()
     local db = addon.db
 
     optionsFrame = CreateFrame("Frame", "SquizzcapOptionsFrame", UIParent, "BackdropTemplate")
-    optionsFrame:SetSize(380, 496)
+    optionsFrame:SetSize(380, 524)
     optionsFrame:SetPoint("CENTER", 0, 0)
     optionsFrame:SetFrameStrata("DIALOG")
     optionsFrame:SetFrameLevel(520)
@@ -542,6 +545,11 @@ local function CreateOptionsPanel()
     CreateCheckbox(content, "Start fresh each Mythic+ key", y,
         function() return db.freshEachKey end,
         function(val) db.freshEachKey = val end)
+    y = y - 28
+
+    CreateCheckbox(content, "Save group members' deaths too", y,
+        function() return db.groupDeaths end,
+        function(val) db.groupDeaths = val end)
     y = y - 32
 
     local clearBtn = CreateFrame("Button", nil, content, "BackdropTemplate")
@@ -635,7 +643,11 @@ local function OnDeath(deathTime)
     local run, runIndex = CurrentRun()
     -- The same death reported twice: it is saved and on screen already. The
     -- second read can have what the first could not (This fight, above).
-    local last = run.deaths[#run.deaths]
+    -- Compared with your own last death: a group member's may be newer.
+    local last
+    for i = #run.deaths, 1, -1 do
+        if not run.deaths[i].who then last = run.deaths[i] break end
+    end
     if SameDeath(last, model) then
         if not last.stub and not last.fight and model.fight then
             last.fight, last.fightWhy = model.fight, nil
@@ -655,7 +667,99 @@ local function OnDeath(deathTime)
     end
 end
 
--- The newest saved death, as something the window can draw.
+-- ---------------------------------------------------------------------------
+-- Group deaths
+--
+-- Blizzard's damage meter lists every death in the fight with a
+-- deathRecapID, and C_DeathRecap reads a group member's recap by it as fully
+-- as your own (probed 2026-10-02, out of combat). The meter's values are
+-- secret while YOU are in combat, so the list is checked every couple of
+-- seconds while you are out of it: between pulls, and while you lie dead
+-- mid-fight. Each recapID is read once per session; a death is saved once
+-- ever (DeathKey), so a /reload re-reading the same list adds nothing.
+--
+-- A group member's death is saved like yours, with `who` = { name, guid,
+-- class, key }. It has no heals or older hits (those logs are yours alone)
+-- and This fight is THEIR damage taken. Only a fully readable recap is kept.
+-- ---------------------------------------------------------------------------
+
+local function ShortName(name)
+    return name and (name:match("^([^%-]+)") or name) or nil
+end
+addon.ShortName = ShortName
+
+local function Plain(v)
+    if v == nil or addon.Data.IsSecret(v) then return nil end
+    return v
+end
+
+local function DeathKey(m)
+    local kb = m.who and m.hits and m.hits[1]
+    if not (kb and kb.timestamp) then return nil end
+    return m.who.key .. ":" .. tostring(kb.timestamp) .. ":" .. tostring(kb.amount)
+end
+
+local function AlreadySaved(key)
+    for _, run in ipairs(addon.db.runs) do
+        for _, m in ipairs(run.deaths) do
+            if m.who and DeathKey(m) == key then return true end
+        end
+    end
+    return false
+end
+
+-- The meter counts Feign Death as a death (see DPSReport's DeathTracker). A
+-- hunter whose "killing blow" left them standing feigned. UNTESTED in game:
+-- whether a feign gets a recap at all is not known.
+local function Feigned(who, kb)
+    return who.class == "HUNTER" and kb.currentHP and kb.amount < kb.currentHP
+end
+
+local readTries = {}   -- recapID -> reads tried this session (true = done)
+local MAX_TRIES = 5
+
+local function CaptureGroupDeaths()
+    local db = addon.db
+    if not (db and db.groupDeaths) or not IsInGroup() or InCombatLockdown() then return end
+    local DM = C_DamageMeter
+    if not (DM and DM.GetCombatSessionFromType and Enum.DamageMeterType and Enum.DamageMeterType.Deaths) then return end
+    local okA, avail = pcall(DM.IsDamageMeterAvailable)
+    if not okA or not Plain(avail) then return end
+    local ok, session = pcall(DM.GetCombatSessionFromType, Enum.DamageMeterSessionType.Current, Enum.DamageMeterType.Deaths)
+    if not ok or type(session) ~= "table" or type(session.combatSources) ~= "table" then return end
+
+    local myGUID = UnitGUID("player")
+    local added = false
+    for _, src in ipairs(session.combatSources) do
+        local id, isMe = Plain(src.deathRecapID), src.isLocalPlayer
+        local name, guid = Plain(src.name), Plain(src.sourceGUID)
+        if id and id ~= 0 and readTries[id] ~= true and not addon.Data.IsSecret(isMe) and not isMe
+            and (guid or name) and not (guid and guid == myGUID) then
+            local model = addon.Data.Read(id)
+            if model and not model.secret then
+                readTries[id] = true
+                local who = { name = name, guid = guid, class = Plain(src.classFilename) }
+                who.key = guid or ShortName(name)
+                model.who = who
+                local key = DeathKey(model)
+                if not Feigned(who, model.hits[1]) and not (key and AlreadySaved(key)) then
+                    model.fight = addon.Data.ReadFight(who)
+                    local run = CurrentRun()
+                    table.insert(run.deaths, model)
+                    added = true
+                end
+            else
+                -- Not there yet, or hidden: try again, but not forever.
+                local n = (readTries[id] or 0) + 1
+                readTries[id] = (n >= MAX_TRIES) or n
+            end
+        end
+    end
+    if added then addon.Window.HistoryChanged() end
+end
+addon.CaptureGroupDeaths = CaptureGroupDeaths
+
+-- The newest saved death of yours, as something the window can draw.
 local function LastDeath()
     local runs = addon.db.runs
     for r = #runs, 1, -1 do
@@ -663,10 +767,45 @@ local function LastDeath()
         for d = #deaths, 1, -1 do
             local m = deaths[d]
             m = (m.stub and liveCopies[m]) or m
-            if not m.stub then return m, r, d end
+            if not m.stub and not m.who then return m, r, d end
         end
     end
     return addon.Data.Read()
+end
+
+-- For other addons -- DPSReport opens a death from its Deaths list with
+-- this. Opens the newest saved death of that player: you when `isPlayer`,
+-- else matched on `guid`, or on `name` (realm ignored) when either side has
+-- no GUID. Secret arguments are ignored. Returns true if a death was opened.
+function Squizzcap_OpenDeathOf(guid, name, isPlayer)
+    if not addon.db then return false end
+    CaptureGroupDeaths() -- a death from the fight that just ended may be unread
+    local IsSecret = addon.Data.IsSecret
+    if IsSecret(guid) or guid == "" then guid = nil end
+    if IsSecret(name) or name == "" then name = nil end
+    if IsSecret(isPlayer) then isPlayer = nil end
+    local me = isPlayer or (guid ~= nil and guid == UnitGUID("player"))
+    local short = ShortName(name)
+    if not me and not guid and not short then return false end
+    local runs = addon.db.runs
+    for r = #runs, 1, -1 do
+        local deaths = runs[r].deaths
+        for d = #deaths, 1, -1 do
+            local m = deaths[d]
+            local who, match = m.who, false
+            if me then
+                match = not who
+            elseif who then
+                if guid and who.guid then match = (who.guid == guid)
+                else match = short ~= nil and ShortName(who.name) == short end
+            end
+            if match and not (m.stub and not liveCopies[m]) then
+                addon.Window.ShowDeath(r, d)
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local events = CreateFrame("Frame")
@@ -674,12 +813,19 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_DEAD")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:RegisterEvent("CHALLENGE_MODE_START")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(self, event, arg1, arg2)
     if event == "ADDON_LOADED" then
         if arg1 == addonName then
             LoadDB()
             self:UnregisterEvent("ADDON_LOADED")
+            -- Cheap when nothing is new: one meter call, every recap read once.
+            C_Timer.NewTicker(2, CaptureGroupDeaths)
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- The pull just ended: pick up its deaths before the next one replaces
+        -- the meter's current session.
+        C_Timer.After(0.5, CaptureGroupDeaths)
     elseif event == "PLAYER_ENTERING_WORLD" then
         local isInitialLogin, isReloadingUi = arg1, arg2
         local inInstance = IsInInstance() and true or false
@@ -734,42 +880,6 @@ SlashCmdList["SQUIZZCAP"] = function(arg)
             Say(string.format("This fight: %d spells recorded for your last death.", #model.fight.spells))
         else
             Say("No This fight tab for your last death: " .. tostring(model.fightWhy or "not recorded (a death from before this was added)"))
-        end
-    elseif arg == "probe" then
-        -- TEMPORARY (2026-09-29): can we read OTHER group members' death
-        -- recaps? Blizzard's meter opens any Deaths entry with its
-        -- deathRecapID (NeverSecret); this checks what an addon gets back.
-        local IsSecret = addon.Data.IsSecret
-        local function S(v) if IsSecret(v) then return "SECRET" end return tostring(v) end
-        local DM = C_DamageMeter
-        if not (DM and Enum.DamageMeterType and Enum.DamageMeterType.Deaths) then Say("probe: no damage meter API") return end
-        Say(string.format("probe: in combat=%s", tostring(InCombatLockdown())))
-        for _, st in ipairs({ { "current", Enum.DamageMeterSessionType.Current }, { "overall", Enum.DamageMeterSessionType.Overall } }) do
-            local ok, session = pcall(DM.GetCombatSessionFromType, st[2], Enum.DamageMeterType.Deaths)
-            if not ok or type(session) ~= "table" then
-                Say("probe " .. st[1] .. ": session error " .. tostring(session))
-            else
-                local sources = session.combatSources or {}
-                Say(string.format("probe %s: %d deaths listed", st[1], #sources))
-                for i, src in ipairs(sources) do
-                    local id = src.deathRecapID
-                    local line = string.format("  #%d %s (%s) me=%s recapID=%s", i, S(src.name), S(src.classFilename), S(src.isLocalPlayer), S(id))
-                    if id and not IsSecret(id) and id ~= 0 then
-                        local okH, has = pcall(C_DeathRecap.HasRecapEvents, id)
-                        local okE, events = pcall(C_DeathRecap.GetRecapEvents, id)
-                        local okM, maxHp = pcall(C_DeathRecap.GetRecapMaxHealth, id)
-                        local n = (okE and type(events) == "table") and #events or -1
-                        local kb = (n > 0) and events[1] or nil
-                        line = line .. string.format(" | has=%s events=%s maxHP=%s", okH and S(has) or "ERR",
-                            okE and tostring(n) or ("ERR " .. tostring(events)), okM and S(maxHp) or "ERR")
-                        if kb then
-                            line = line .. string.format(" | KB spell=%s amount=%s hp=%s src=%s",
-                                S(kb.spellName), S(kb.amount), S(kb.currentHP), S(kb.sourceName))
-                        end
-                    end
-                    print(line)
-                end
-            end
         end
     elseif arg == "notes" or arg == "changelog" then
         addon.Welcome.ShowReleaseNotes()

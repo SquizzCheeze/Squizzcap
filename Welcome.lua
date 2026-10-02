@@ -23,6 +23,12 @@ addon.Welcome = Welcome
 -- ADD A NEW ENTRY AS PART OF RELEASING. A version with no entry still shows
 -- the update window, just without bullets.
 local RELEASE_NOTES = {
+    ["1.3.0"] = {
+        "Group deaths: when someone in your group dies, their death recap is saved too. Open it from All deaths "
+            .. "for the same window as yours, in their class colour, with everything that hit them this fight.",
+        "All deaths shows whose death each one was, with a button to switch between everyone and just you.",
+        "Using DPS Report? Click a player on its Deaths list to open their death here.",
+    },
     ["1.2.0"] = {
         "A \"This fight\" tab: everything that hit you over the whole pull, from Blizzard's damage meter, with "
             .. "who cast each spell, how much it did, and Blizzard's Avoidable and Deadly markers.",

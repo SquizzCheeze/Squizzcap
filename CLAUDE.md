@@ -20,7 +20,7 @@ grouped into runs, for looking back over a key or a raid night. No libraries.
 |------|---------|
 | `Data.lua` | Reads `C_DeathRecap` into a plain model (`Data.Read`), extends it with the hit/heal log, and reads the damage meter's This fight (`Data.ReadFight`). Header comment documents Blizzard's recap field meanings -- read it first |
 | `Window.lua` | The toast and the full window: title, card, stats, health graph strip, tabs (`TABS`: Hits, Sources, This fight, All deaths), share buttons. `Window.HistoryChanged()` redraws an open window |
-| `Squizzcap.lua` | Settings (`defaults`, `Backfill`), options panel, runs, the death event, slash commands |
+| `Squizzcap.lua` | Settings (`defaults`, `Backfill`), options panel, runs, the death event, group deaths + `Squizzcap_OpenDeathOf`, slash commands |
 | `Welcome.lua` | First-run greeting + per-version notes. `RELEASE_NOTES` keyed by the TOC Version, THREE-part (`"1.2.0"`) -- adding an entry is a release step. Ported from SquizzTalents |
 
 ## Development
@@ -62,6 +62,30 @@ grouped into runs, for looking back over a key or a raid night. No libraries.
   the tab to the saved death; the failure reason is stored in `model.fightWhy` and printed by
   `/squizzcap fight`. Seen working in an arena before the retry; the retry itself is UNTESTED in game.
 
+## Group deaths (V1.3.0, `Squizzcap.lua` "Group deaths")
+
+- **Other members' recaps ARE readable.** The damage meter's Deaths session lists every death with a plain
+  `deathRecapID`, and `C_DeathRecap` reads another player's recap by it as fully as yours (probed in a
+  party, out of combat, 2026-10-02: 10 events, max health, killing blow, all plain). The meter is secret
+  while YOU are in combat, so `CaptureGroupDeaths` runs on a 2s ticker that returns at once in combat or
+  out of a group, plus 0.5s after `PLAYER_REGEN_ENABLED`. Reading in combat is UNTESTED and not attempted.
+- Only the **Current** session is read. Overall can still hold a previous key's deaths, and with
+  `freshEachKey` those would be re-saved into the new run.
+- Each recapID is read once per session (`readTries`, giving up after 5 unreadable tries); each death is
+  saved once ever (`DeathKey` = who + killing blow timestamp + amount), so a /reload re-reading the same
+  list adds nothing.
+- A group death carries `model.who = { name, guid, class, key }` (`key` = GUID, else short name). It has
+  **no heals and no extended hits** (UNIT_COMBAT logs are the player's only, so `Data.Read` gets no
+  deathTime), and This fight is `Data.ReadFight(who)` -- their damage taken, matched on GUID else name.
+  Secret recaps are not saved at all (no stub). Anything walking saved deaths must handle `m.who`: your
+  own last death (`LastDeath`, the PLAYER_DEAD dedup in `OnDeath`) skips them, `RunSummary` counts only
+  yours, the title-bar dots show only the shown person's deaths (`SamePerson`).
+- **Feign Death**: the meter counts it as a death. A HUNTER whose killing blow left them above 0 is
+  dropped (`Feigned`). Whether a feign even gets a recap is untested.
+- **`Squizzcap_OpenDeathOf(guid, name, isPlayer)`** is the one deliberate global: DPSReport's Deaths list
+  calls it on click. Opens the newest saved death of that player (GUID match, else name with realm
+  stripped); returns true if it opened one. Keep the signature stable -- another addon depends on it.
+
 ## Slash commands
 
 | Command | Action |
@@ -71,7 +95,6 @@ grouped into runs, for looking back over a key or a raid night. No libraries.
 | `/squizzcap toast` | Show the last death as the compact summary |
 | `/squizzcap fight` | Why the last death has (or lacks) a This fight tab |
 | `/squizzcap notes` | Re-open the release notes |
-| `/squizzcap probe` | **TEMPORARY** (shipped in V1.2.0): lists the damage meter's Deaths entries and tries `C_DeathRecap` on each `deathRecapID`, to learn whether OTHER group members' recaps are readable. The answer gates a "group deaths" feature here and "open this death in Squizzcap" in DPSReport. Remove once the user has run it in a group |
 
 ## Releasing
 

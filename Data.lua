@@ -466,7 +466,17 @@ end
 
 local FIGHT_MAX_SPELLS = 20
 
-function Data.ReadFight()
+-- Is this damage-taken entry `who` (nil: you)? A group member is matched on
+-- GUID where both sides are readable, else on name.
+local function IsEntryFor(src, who)
+    if not who then return src.isLocalPlayer and not IsSecret(src.isLocalPlayer) end
+    local guid, name = src.sourceGUID, src.name
+    if who.guid and guid and not IsSecret(guid) then return guid == who.guid end
+    return who.name ~= nil and name ~= nil and not IsSecret(name) and name == who.name
+end
+
+-- `who` = nil reads your own fight; a group member's `model.who` reads theirs.
+function Data.ReadFight(who)
     local DM = C_DamageMeter
     if not (DM and DM.GetCombatSessionFromType and Enum.DamageMeterType and Enum.DamageMeterSessionType) then return nil, "no damage meter API" end
     local okAvail, avail, failure = pcall(DM.IsDamageMeterAvailable)
@@ -476,14 +486,14 @@ function Data.ReadFight()
     end
     local current, taken = Enum.DamageMeterSessionType.Current, Enum.DamageMeterType.DamageTaken
 
-    -- Your own entry in this fight's damage-taken list, for its GUID.
+    -- Their entry in this fight's damage-taken list, for its GUID.
     local okSess, session = pcall(DM.GetCombatSessionFromType, current, taken)
     if not okSess or type(session) ~= "table" or type(session.combatSources) ~= "table" then return nil, "no damage-taken session" end
     local me
     for _, src in ipairs(session.combatSources) do
-        if src.isLocalPlayer then me = src break end
+        if IsEntryFor(src, who) then me = src break end
     end
-    if not me or IsSecret(me.sourceGUID) then return nil, "your entry missing or hidden" end
+    if not me or IsSecret(me.sourceGUID) then return nil, (who and "their" or "your") .. " entry missing or hidden" end
 
     local okSrc, source = pcall(DM.GetCombatSessionSourceFromType, current, taken, me.sourceGUID)
     if not okSrc or type(source) ~= "table" or type(source.combatSpells) ~= "table" then return nil, "no spell breakdown" end
@@ -533,6 +543,12 @@ end
 -- Returns the model for the most recent death (recapID nil), or nil + reason.
 -- `deathTime` (GetTime() when you died) lets the incoming heals be placed;
 -- without it -- reopening a recap later -- they are simply not attached.
+--
+-- A recapID from the damage meter's Deaths list reads ANOTHER group member's
+-- recap, and those are readable: probed in a party out of combat 2026-10-02,
+-- every field plain (10 events, max health, killing blow). The heal and hit
+-- logs are yours alone, so a group member's model never has heals placed or
+-- older hits added: pass no deathTime for one.
 function Data.Read(recapID, deathTime)
     if not (C_DeathRecap and C_DeathRecap.GetRecapEvents) then
         return nil, "death recap API not available"

@@ -54,13 +54,32 @@ local C = {
     worn     = { 0.900, 0.800, 0.400 },
 }
 
+-- Your class colour, or `class`'s (a group member's death is drawn in theirs).
 local accent = { 0.7, 0.7, 0.7 }
-local function RefreshAccent()
-    local ok, _, class = pcall(UnitClass, "player")
-    if ok and class and not IsSecret(class) then
+local function RefreshAccent(class)
+    if not class then
+        local ok, _, c = pcall(UnitClass, "player")
+        class = ok and c or nil
+    end
+    if class and not IsSecret(class) then
         local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
         if c then accent[1], accent[2], accent[3] = c.r, c.g, c.b end
     end
+end
+
+-- A group member's name in their class colour (model.who, Squizzcap.lua).
+local function WhoText(who)
+    local c = who.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[who.class]
+    local name = who.name or UNKNOWN
+    if not c then return name end
+    return string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, name)
+end
+
+-- Two saved deaths of the same person (you, or one group member).
+local function SamePerson(a, b)
+    local wa, wb = a.who, b.who
+    if not wa or not wb then return not wa and not wb end
+    return wa.key == wb.key
 end
 
 local function Fmt(n)
@@ -271,6 +290,7 @@ local function BuildTitle()
     local sub = Text(bar, FONT.body, 13, C.muted)
     sub:SetPoint("LEFT", ui.titleText, "RIGHT", 10, -1)
     sub:SetText("Death recap")
+    ui.titleSub = sub
 
     local close = SmallButton(bar, 26, 26, "x")
     close:SetPoint("RIGHT", -6, 0)
@@ -307,7 +327,8 @@ local function Pip(i)
         local deaths = ui.run and ui.run.deaths or {}
         local m = deaths[self.index]
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:SetText(string.format("Death %d of %d this run", self.index, #deaths), 1, 1, 1)
+        local whose = (m and m.who) and (WhoText(m.who) .. ": death") or "Death"
+        GameTooltip:SetText(string.format("%s %d of %d this run", whose, self.ordinal, self.count), 1, 1, 1)
         if m and not m.stub and m.hits and m.hits[1] and not m.secret then
             GameTooltip:AddLine(m.hits[1].name, C.muted[1], C.muted[2], C.muted[3])
         end
@@ -346,6 +367,7 @@ local function BuildCard()
 
     local label = Label(card, "KILLED BY")
     label:SetPoint("TOPLEFT", card, "TOPLEFT", 92, -12)
+    ui.kbLabel = label
 
     ui.kbName = Text(card, FONT.head, 24, C.text)
     ui.kbName:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -3)
@@ -417,6 +439,7 @@ local function BuildStrip()
     ui.strip = p
     local l = Label(p, "YOUR HEALTH")
     l:SetPoint("TOPLEFT", 12, -9)
+    ui.stripLabel = l
     ui.stripHint = Text(p, FONT.body, 12, C.muted, "RIGHT")
     ui.stripHint:SetPoint("TOPRIGHT", -12, -9)
 
@@ -665,6 +688,7 @@ local function BuildShare()
     ui.share = p
     local l = Label(p, "WHAT HIT YOU")
     l:SetPoint("TOPLEFT", 12, -9)
+    ui.shareLabel = l
     ui.shareBar = CreateFrame("Frame", nil, p)
     ui.shareBar:SetPoint("TOPLEFT", 12, -26)
     ui.shareBar:SetSize(INNER - 24, 10)
@@ -1097,7 +1121,8 @@ local function FightLine(p, j)
             GameTooltip:SetText(sp.name, 1, 1, 1)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(Fmt(sp.amount) .. " damage to you this fight", C.dmg[1], C.dmg[2], C.dmg[3])
+        local who = ui.model and ui.model.who
+        GameTooltip:AddLine(Fmt(sp.amount) .. " damage to " .. (who and (who.name or UNKNOWN) or "you") .. " this fight", C.dmg[1], C.dmg[2], C.dmg[3])
         if sp.creature then GameTooltip:AddLine(sp.creature, C.muted[1], C.muted[2], C.muted[3]) end
         if sp.avoidable and DEATH_RECAP_AVOIDABLE_SPELL then
             GameTooltip:AddLine(CreateAtlasMarkup(BADGE.avoidable.atlas, 16, 16) .. " " .. DEATH_RECAP_AVOIDABLE_SPELL, 1, 1, 1, true)
@@ -1124,6 +1149,7 @@ local function RenderFight(model)
     local p = FightPanel()
     p:ClearAllPoints()
     p:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, 0)
+    p.name:SetText(model.who and ("Everything that hit " .. WhoText(model.who) .. " this fight") or "Everything that hit you this fight")
     local dur = FightDuration(fight.duration)
     local avoid = ""
     if (fight.avoidable or 0) > 0 and fight.total > 0 then
@@ -1194,13 +1220,14 @@ end
 
 -- What a run's deaths have in common: how many were an avoidable killing
 -- blow, and a killer that got you more than once. Only readable deaths
--- count (a stub or secret recap has no names to compare). nil when neither
--- applies, so a clean single death adds no line.
+-- count (a stub or secret recap has no names to compare), and only YOURS:
+-- the line is about you, and group members' deaths are listed beside it.
+-- nil when neither applies, so a clean single death adds no line.
 local function RunSummary(run)
     local avoidable, byName, readable, avoidHits = 0, {}, 0, 0
     for _, m in ipairs(run.deaths) do
         local kb = m.hits and m.hits[1]
-        if kb and not m.stub and not m.secret then
+        if kb and not m.stub and not m.secret and not m.who then
             readable = readable + 1
             if kb.avoidable then avoidable = avoidable + 1 end
             local name = kb.name or UNKNOWN
@@ -1294,6 +1321,15 @@ local function HistoryFooter()
     f.clear = ConfirmButton(f, 150, "Clear all", "Click again to clear",
         function() addon.ClearSavedDeaths() end)
     f.clear:SetPoint("RIGHT", 0, 0)
+    -- Everyone's deaths, or only yours (a raid wipe adds twenty at once).
+    f.show = SmallButton(f, 150, 26, "")
+    f.show:SetPoint("CENTER", 0, 0)
+    f.show.tip = "Switch between every death in the group and only your own."
+    f.show:SetScript("OnClick", function()
+        local db = addon.db
+        db.historyShow = (db.historyShow == "mine") and "all" or "mine"
+        Render()
+    end)
     ui.historyFooter = f
     return f
 end
@@ -1326,8 +1362,14 @@ local function RenderHistory()
     state.viewRun = math.max(1, math.min(state.viewRun or #runs, #runs))
     local runIndex = state.viewRun
     local run = runs[runIndex]
+    local mineOnly = addon.db and addon.db.historyShow == "mine"
+    local own = 0
+    for _, m in ipairs(run.deaths) do if not m.who then own = own + 1 end end
+    local group = #run.deaths - own
     header.title:SetText(RunTitle(run))
-    header.sub:SetText(string.format("Run %d of %d  ·  %d %s  ·  %s", runIndex, #runs, #run.deaths, #run.deaths == 1 and "death" or "deaths", Ago(run.started)))
+    local count = string.format("%d %s", #run.deaths, #run.deaths == 1 and "death" or "deaths")
+    if group > 0 then count = count .. string.format(", %d yours", own) end
+    header.sub:SetText(string.format("Run %d of %d  ·  %s  ·  %s", runIndex, #runs, count, Ago(run.started)))
     header.prev:SetEnabledLook(runIndex > 1)
     header.next:SetEnabledLook(runIndex < #runs)
     local summary = RunSummary(run)
@@ -1340,38 +1382,44 @@ local function RenderHistory()
     local shown = 0
     for i = #list, 1, -1 do
         local m = list[i]
-        shown = shown + 1
-        local r = DeathRow(shown)
-        r.index, r.runIndex = i, runIndex
-        r:ClearAllPoints()
-        r:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, -y)
-        local kb = m.hits and m.hits[1]
-        r.num:SetText(i)
-        if m.stub or not kb then
-            -- The game hid this recap's values, so nothing could be saved.
-            r.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            r.what:SetText("Details hidden by the game")
-            r.sub:SetText(Ago(m.when))
-            r.avoid:Hide()
-            r.fast:SetText("")
-        else
-            r.icon:SetTexture(kb.icon)
-            r.what:SetText(kb.name or UNKNOWN)
-            local avoidN = Data.AvoidableHits(m)
-            local avoidTxt = (avoidN and avoidN > 0)
-                and string.format("  ·  |cffffb066%d avoidable %s|r", avoidN, avoidN == 1 and "hit" or "hits") or ""
-            r.sub:SetText((m.secret and "" or ((kb.source or "") .. "  ·  ")) .. Ago(m.when) .. avoidTxt)
-            r.avoid:SetShown(not m.secret and kb.avoidable)
-            r.fast:SetText((not m.secret and m.speed) and string.format("%.1fs", m.speed.seconds) or "")
+        if not (mineOnly and m.who) then
+            shown = shown + 1
+            local r = DeathRow(shown)
+            r.index, r.runIndex = i, runIndex
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", ui.list, "TOPLEFT", 0, -y)
+            local kb = m.hits and m.hits[1]
+            r.num:SetText(i)
+            if m.stub or not kb then
+                -- The game hid this recap's values, so nothing could be saved.
+                r.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                r.what:SetText("Details hidden by the game")
+                r.sub:SetText(Ago(m.when))
+                r.avoid:Hide()
+                r.fast:SetText("")
+            else
+                r.icon:SetTexture(kb.icon)
+                r.what:SetText(kb.name or UNKNOWN)
+                local avoidN = Data.AvoidableHits(m)
+                local avoidTxt = (avoidN and avoidN > 0)
+                    and string.format("  ·  |cffffb066%d avoidable %s|r", avoidN, avoidN == 1 and "hit" or "hits") or ""
+                -- Whose death, once the list holds more than yours.
+                local whose = m.who and (WhoText(m.who) .. "  ·  ") or ((group > 0 and not mineOnly) and "You  ·  " or "")
+                r.sub:SetText(whose .. (m.secret and "" or ((kb.source or "") .. "  ·  ")) .. Ago(m.when) .. avoidTxt)
+                r.avoid:SetShown(not m.secret and kb.avoidable)
+                r.fast:SetText((not m.secret and m.speed) and string.format("%.1fs", m.speed.seconds) or "")
+            end
+            local cur = (run == ui.run and i == ui.deathIndex)
+            r:SetBorderColor(cur and accent[1] or C.border[1], cur and accent[2] or C.border[2], cur and accent[3] or C.border[3], 1)
+            r.bg:SetColorTexture(unpack(cur and C.rowSel or C.panel))
+            r:Show()
+            y = y + 48 + 6
         end
-        local cur = (run == ui.run and i == ui.deathIndex)
-        r:SetBorderColor(cur and accent[1] or C.border[1], cur and accent[2] or C.border[2], cur and accent[3] or C.border[3], 1)
-        r.bg:SetColorTexture(unpack(cur and C.rowSel or C.panel))
-        r:Show()
-        y = y + 48 + 6
     end
     for i = shown + 1, #ui.deathRows do ui.deathRows[i]:Hide() end
-    HistoryFooter():Show()
+    local footer = HistoryFooter()
+    footer.show.label:SetText(mineOnly and "Showing: just you" or "Showing: everyone")
+    footer:Show()
     return y
 end
 
@@ -1394,8 +1442,13 @@ end
 Render = function()
     local model = ui.model
     if not model then return end
-    RefreshAccent()
+    local who = model.who
+    RefreshAccent(who and who.class)
     ui.titleText:SetTextColor(accent[1], accent[2], accent[3])
+    ui.titleSub:SetText(who and ("Death recap  ·  " .. WhoText(who)) or "Death recap")
+    ui.kbLabel:SetText(who and (WhoText(who) .. "  ·  KILLED BY") or "KILLED BY")
+    ui.stripLabel:SetText(who and "HEALTH" or "YOUR HEALTH")
+    ui.shareLabel:SetText(who and "WHAT HIT THEM" or "WHAT HIT YOU")
 
     local kb = model.hits[1]
 
@@ -1463,6 +1516,10 @@ Render = function()
             -- 2026-09-28: full-size amounts at full health), so say so. The
             -- column is ~104px, too narrow for the heal count as well.
             ui.statHeal.sub:SetText("incl. overheal")
+        elseif who then
+            -- The game reports heals landing on you, and no one else.
+            ui.statHeal.value:SetText("-")
+            ui.statHeal.sub:SetText("yours only")
         else
             -- A death saved before heals were logged, or one reopened later
             -- without the moment of death to line them up against.
@@ -1508,14 +1565,20 @@ Render = function()
     ui.link:SetEnabledLook(model.link ~= nil)
     ui.report:SetEnabledLook(not model.secret)
 
-    -- One dot per death in this run (the last six), newest on the right.
-    local n = ui.run and #ui.run.deaths or 0
+    -- One dot per death in this run (the last six) of the person shown --
+    -- you, or the group member -- newest on the right.
+    local theirs = {}
+    for i, m in ipairs(ui.run and ui.run.deaths or {}) do
+        if SamePerson(m, model) then theirs[#theirs + 1] = i end
+    end
+    local n = #theirs
     local first = math.max(1, n - 5)
     local shown = 0
-    for i = n, first, -1 do
+    for k = n, first, -1 do
+        local i = theirs[k]
         shown = shown + 1
         local p = Pip(shown)
-        p.index = i
+        p.index, p.ordinal, p.count = i, k, n
         p:ClearAllPoints()
         p:SetPoint("RIGHT", ui.pipAnchor, "RIGHT", -(shown - 1) * 18, 0)
         local cur = (i == ui.deathIndex)
