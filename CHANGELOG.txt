@@ -2,6 +2,14 @@ Squizzcap - Changelog
 =====================
 
 
+V1.3.1
+------
+
+Changed:
+
+- DPS Report can now open a particular death, not only the newest: its
+  Deaths list in time order opens the death on the row you click.
+
 V1.3.0 (2026-10-02)
 -------------------
 

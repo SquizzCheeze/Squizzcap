@@ -777,7 +777,11 @@ end
 -- this. Opens the newest saved death of that player: you when `isPlayer`,
 -- else matched on `guid`, or on `name` (realm ignored) when either side has
 -- no GUID. Secret arguments are ignored. Returns true if a death was opened.
-function Squizzcap_OpenDeathOf(guid, name, isPlayer)
+-- `fromLatest` (optional, V1.3.1) asks for an older one: 1 = the newest,
+-- 2 = the one before, and so on -- DPSReport's Deaths list in time order
+-- opens the death on the row clicked. Past the oldest saved one, the oldest
+-- is opened.
+function Squizzcap_OpenDeathOf(guid, name, isPlayer, fromLatest)
     if not addon.db then return false end
     CaptureGroupDeaths() -- a death from the fight that just ended may be unread
     local IsSecret = addon.Data.IsSecret
@@ -787,7 +791,9 @@ function Squizzcap_OpenDeathOf(guid, name, isPlayer)
     local me = isPlayer or (guid ~= nil and guid == UnitGUID("player"))
     local short = ShortName(name)
     if not me and not guid and not short then return false end
+    if IsSecret(fromLatest) or type(fromLatest) ~= "number" or fromLatest < 1 then fromLatest = 1 end
     local runs = addon.db.runs
+    local seen, lastR, lastD = 0, nil, nil
     for r = #runs, 1, -1 do
         local deaths = runs[r].deaths
         for d = #deaths, 1, -1 do
@@ -800,10 +806,19 @@ function Squizzcap_OpenDeathOf(guid, name, isPlayer)
                 else match = short ~= nil and ShortName(who.name) == short end
             end
             if match and not (m.stub and not liveCopies[m]) then
-                addon.Window.ShowDeath(r, d)
-                return true
+                seen = seen + 1
+                lastR, lastD = r, d
+                if seen >= fromLatest then
+                    addon.Window.ShowDeath(r, d)
+                    return true
+                end
             end
         end
+    end
+    -- Asked further back than we hold: the oldest one we have.
+    if lastR then
+        addon.Window.ShowDeath(lastR, lastD)
+        return true
     end
     return false
 end
