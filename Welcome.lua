@@ -23,6 +23,9 @@ addon.Welcome = Welcome
 -- ADD A NEW ENTRY AS PART OF RELEASING. A version with no entry still shows
 -- the update window, just without bullets.
 local RELEASE_NOTES = {
+    ["1.3.1"] = {
+        "Using DPS Report's Deaths list in time order? Clicking a death now opens that exact death here, not just the player's latest.",
+    },
     ["1.3.0"] = {
         "Group deaths: when someone in your group dies, their death recap is saved too. Open it from All deaths "
             .. "for the same window as yours, in their class colour, with everything that hit them this fight.",

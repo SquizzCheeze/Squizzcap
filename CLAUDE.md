@@ -12,7 +12,7 @@ grouped into runs, for looking back over a key or a raid night. No libraries.
 - **SavedVariables**: `SquizzcapDB` (per character: settings AND saved runs) and `SquizzcapAccountDB`
   (account-wide: only the welcome window's `lastSeenVersion`).
 - **Slash**: `/squizzcap` or `/scr`.
-- Latest release: **V1.3.0 (2026-10-02)**.
+- Latest release: **V1.3.1 (2026-10-11)**.
 
 ## Files (load order from the TOC)
 
