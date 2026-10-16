@@ -1,4 +1,4 @@
-## Interface: 120100, 120105
+## Interface: 120105
 ## Title: Squizzcap - Death Recap
 ## Notes: Pops up a detailed death recap when you die. Stays open through release and resurrection until manually closed.
 ## Author: Squizzcap
