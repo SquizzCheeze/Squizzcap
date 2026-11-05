@@ -2,6 +2,13 @@ Squizzcap - Changelog
 =====================
 
 
+V1.4.0 (2026-11-05)
+-------------------
+
+New:
+
+- Squizzcap now runs on WoW Forever as well as retail.
+
 V1.3.1 (2026-10-11)
 -------------------
 

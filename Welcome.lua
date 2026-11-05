@@ -23,6 +23,9 @@ addon.Welcome = Welcome
 -- ADD A NEW ENTRY AS PART OF RELEASING. A version with no entry still shows
 -- the update window, just without bullets.
 local RELEASE_NOTES = {
+    ["1.4.0"] = {
+        "Now runs on WoW Forever as well as retail.",
+    },
     ["1.3.1"] = {
         "Using DPS Report's Deaths list in time order? Clicking a death now opens that exact death here, not just the player's latest.",
     },
